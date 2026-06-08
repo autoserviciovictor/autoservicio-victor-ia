@@ -1,0 +1,13 @@
+{
+  "name": "autoservicio-victor-ia",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "express": "^4.19.2",
+    "openai": "^4.56.0"
+  }
+}
