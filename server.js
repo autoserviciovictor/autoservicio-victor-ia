@@ -255,7 +255,7 @@ ${text}
       {
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to: from,
+        to: "542994654375",
         type: "text",
         text: {
           preview_url: false,
