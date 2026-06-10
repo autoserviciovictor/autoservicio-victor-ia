@@ -115,8 +115,40 @@ Mensaje del cliente: ${text}
     const extractor = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: `
-Extraé datos de pedido del siguiente mensaje.
-Respondé SOLO JSON válido.
+const extractor = await openai.responses.create({
+  model: "gpt-4.1-mini",
+  input: `
+Extraé datos de pedido del siguiente mensaje de WhatsApp.
+
+Respondé SOLO JSON válido, sin explicación.
+
+Considerá que hay un pedido completo si el mensaje incluye:
+- nombre del cliente
+- dirección
+- forma de pago
+- al menos un producto
+
+El horario de entrega es opcional.
+
+Si hay pedido completo, respondé:
+{
+  "pedido_completo": true,
+  "cliente": "",
+  "direccion": "",
+  "pago": "",
+  "productos": "",
+  "horario_entrega": ""
+}
+
+Si NO hay pedido completo, respondé:
+{
+  "pedido_completo": false
+}
+
+Mensaje:
+${text}
+  `,
+});
 
 Si no hay pedido completo, respondé:
 {"pedido_completo": false}
