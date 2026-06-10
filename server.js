@@ -1,17 +1,59 @@
 const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
+const { google } = require("googleapis");
 
 const app = express();
 app.use(express.json());
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+
+const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
+
+async function guardarPedido({ cliente, telefono, productos, direccion, pago }) {
+  const auth = new google.auth.JWT(
+    GOOGLE_CLIENT_EMAIL,
+    null,
+    GOOGLE_PRIVATE_KEY,
+    ["https://www.googleapis.com/auth/spreadsheets"]
+  );
+
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const ahora = new Date();
+  const fecha = ahora.toLocaleDateString("es-AR");
+  const hora = ahora.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: "Hoja 1!A:I",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[
+        fecha,
+        hora,
+        cliente || "",
+        telefono || "",
+        productos || "",
+        direccion || "",
+        pago || "",
+        "",
+        "Pendiente"
+      ]],
+    },
+  });
+
+  console.log("Pedido guardado en Google Sheets");
+}
 
 app.get("/", (req, res) => {
   res.send("Servidor Autoservicio Victor IA funcionando");
@@ -22,21 +64,16 @@ app.get("/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  console.log("Verificando webhook:", { mode, token, challenge });
-
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("Webhook verificado correctamente");
     return res.status(200).send(challenge);
   }
 
-  console.log("Error verificando webhook");
   return res.sendStatus(403);
 });
 
 app.post("/webhook", async (req, res) => {
   try {
-    const value = req.body.entry?.[0]?.changes?.[0]?.value;
-    const message = value?.messages?.[0];
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
     if (!message || message.type !== "text") {
       return res.sendStatus(200);
@@ -63,26 +100,59 @@ Información del negocio:
 
 Reglas:
 - Respondé breve, amable y en español argentino.
-- Tu función principal es responder consultas y tomar pedidos.
-- Si el cliente quiere hacer un pedido, pedí nombre, dirección, forma de pago y productos.
+- Tomá pedidos.
+- Si faltan datos, pedí nombre, dirección, forma de pago y productos.
 - No confirmes stock.
 - No confirmes precio final.
 - Decí que un vendedor confirmará disponibilidad y precio final.
-- Si el cliente pregunta algo que no sabés, decí que lo va a confirmar un vendedor.
 
 Mensaje del cliente: ${text}
       `,
     });
 
-    const reply =
-      ai.output_text ||
-      "Gracias. Un vendedor de Autoservicio Victor te responderá en breve.";
+    const reply = ai.output_text || "Gracias. Un vendedor te responderá en breve.";
 
-    console.log("Respuesta IA:", reply);
-    console.log("Enviando respuesta a:", from);
-    console.log("PHONE_NUMBER_ID usado:", PHONE_NUMBER_ID);
+    const extractor = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: `
+Extraé datos de pedido del siguiente mensaje.
+Respondé SOLO JSON válido.
 
-    const response = await axios.post(
+Si no hay pedido completo, respondé:
+{"pedido_completo": false}
+
+Si hay pedido completo, respondé:
+{
+  "pedido_completo": true,
+  "cliente": "",
+  "direccion": "",
+  "pago": "",
+  "productos": ""
+}
+
+Mensaje:
+${text}
+      `,
+    });
+
+    let data;
+    try {
+      data = JSON.parse(extractor.output_text);
+    } catch {
+      data = { pedido_completo: false };
+    }
+
+    if (data.pedido_completo) {
+      await guardarPedido({
+        cliente: data.cliente,
+        telefono: from,
+        productos: data.productos,
+        direccion: data.direccion,
+        pago: data.pago,
+      });
+    }
+
+    await axios.post(
       `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
       {
         messaging_product: "whatsapp",
@@ -101,8 +171,6 @@ Mensaje del cliente: ${text}
         },
       }
     );
-
-    console.log("Mensaje enviado correctamente:", response.data);
 
     return res.sendStatus(200);
   } catch (error) {
