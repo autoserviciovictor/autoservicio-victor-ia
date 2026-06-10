@@ -38,6 +38,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     const from = message.from;
+    console.log("Numero recibido:", message.from);
     const text = message.text.body;
 
     const ai = await openai.responses.create({
