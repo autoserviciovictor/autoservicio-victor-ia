@@ -16,7 +16,15 @@ const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
-async function guardarPedido({ cliente, telefono, productos, direccion, pago }) {
+
+async function guardarPedido({
+  cliente,
+  telefono,
+  productos,
+  direccion,
+  pago,
+  horario_entrega,
+}) {
   const auth = new google.auth.JWT(
     GOOGLE_CLIENT_EMAIL,
     null,
@@ -38,17 +46,19 @@ async function guardarPedido({ cliente, telefono, productos, direccion, pago }) 
     range: "Hoja 1!A:I",
     valueInputOption: "USER_ENTERED",
     requestBody: {
-      values: [[
-        fecha,
-        hora,
-        cliente || "",
-        telefono || "",
-        productos || "",
-        direccion || "",
-        pago || "",
-        "",
-        "Pendiente"
-      ]],
+      values: [
+        [
+          fecha,
+          hora,
+          cliente || "",
+          telefono || "",
+          productos || "",
+          direccion || "",
+          pago || "",
+          horario_entrega || "",
+          "Pendiente",
+        ],
+      ],
     },
   });
 
@@ -105,19 +115,18 @@ Reglas:
 - No confirmes stock.
 - No confirmes precio final.
 - Decí que un vendedor confirmará disponibilidad y precio final.
+- Si el cliente da un pedido completo, agradecé y decí que un vendedor confirmará.
 
 Mensaje del cliente: ${text}
       `,
     });
 
-    const reply = ai.output_text || "Gracias. Un vendedor te responderá en breve.";
+    const reply =
+      ai.output_text || "Gracias. Un vendedor te responderá en breve.";
 
     const extractor = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: `
-const extractor = await openai.responses.create({
-  model: "gpt-4.1-mini",
-  input: `
 Extraé datos de pedido del siguiente mensaje de WhatsApp.
 
 Respondé SOLO JSON válido, sin explicación.
@@ -147,32 +156,18 @@ Si NO hay pedido completo, respondé:
 
 Mensaje:
 ${text}
-  `,
-});
-
-Si no hay pedido completo, respondé:
-{"pedido_completo": false}
-
-Si hay pedido completo, respondé:
-{
-  "pedido_completo": true,
-  "cliente": "",
-  "direccion": "",
-  "pago": "",
-  "productos": ""
-}
-
-Mensaje:
-${text}
       `,
     });
 
     let data;
     try {
       data = JSON.parse(extractor.output_text);
-    } catch {
+    } catch (error) {
+      console.log("No se pudo parsear JSON del extractor:", extractor.output_text);
       data = { pedido_completo: false };
     }
+
+    console.log("Datos extraídos:", data);
 
     if (data.pedido_completo) {
       await guardarPedido({
@@ -181,6 +176,7 @@ ${text}
         productos: data.productos,
         direccion: data.direccion,
         pago: data.pago,
+        horario_entrega: data.horario_entrega,
       });
     }
 
@@ -189,7 +185,7 @@ ${text}
       {
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to: "542994654375",
+        to: from,
         type: "text",
         text: {
           preview_url: false,
@@ -203,6 +199,8 @@ ${text}
         },
       }
     );
+
+    console.log("Respuesta enviada a WhatsApp");
 
     return res.sendStatus(200);
   } catch (error) {
