@@ -16,6 +16,16 @@ const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
+const mensajesProcesados = new Set();
+
+function limpiarJson(texto) {
+  if (!texto) return "{}";
+
+  return texto
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+}
 
 async function guardarPedido({
   cliente,
@@ -24,6 +34,7 @@ async function guardarPedido({
   direccion,
   pago,
   horario_entrega,
+  estado,
 }) {
   const auth = new google.auth.JWT(
     GOOGLE_CLIENT_EMAIL,
@@ -35,8 +46,13 @@ async function guardarPedido({
   const sheets = google.sheets({ version: "v4", auth });
 
   const ahora = new Date();
-  const fecha = ahora.toLocaleDateString("es-AR");
+
+  const fecha = ahora.toLocaleDateString("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  });
+
   const hora = ahora.toLocaleTimeString("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -56,7 +72,7 @@ async function guardarPedido({
           direccion || "",
           pago || "",
           horario_entrega || "",
-          "Pendiente",
+          estado || "Pendiente",
         ],
       ],
     },
@@ -89,11 +105,119 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
+    if (mensajesProcesados.has(message.id)) {
+      console.log("Mensaje duplicado ignorado:", message.id);
+      return res.sendStatus(200);
+    }
+
+    mensajesProcesados.add(message.id);
+
     const from = message.from;
     const text = message.text.body;
 
     console.log("Mensaje recibido de:", from);
     console.log("Texto recibido:", text);
+
+    const extractor = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: `
+Extraé datos de un posible pedido de WhatsApp para un autoservicio.
+
+Respondé SOLO JSON válido. No expliques nada.
+
+Detectá como pedido si el cliente:
+- pide productos
+- dice "quiero", "necesito", "te encargo", "mandame", "anotame", "pedido", "comprar"
+- enumera productos aunque falten nombre, dirección o pago
+
+Productos pueden venir así:
+- "2 coca, 1 pan"
+- "coca x2"
+- "yerba, azúcar y leche"
+- "necesito fideos aceite galletitas"
+- "te encargo arroz x2 azúcar x1"
+
+Devolvé este formato:
+
+{
+  "hay_pedido": true,
+  "pedido_completo": true,
+  "cliente": "",
+  "direccion": "",
+  "pago": "",
+  "productos": "",
+  "horario_entrega": "",
+  "datos_faltantes": []
+}
+
+Reglas:
+- "hay_pedido" es true si hay productos o intención clara de comprar.
+- "pedido_completo" es true solo si tiene productos, nombre, dirección y forma de pago.
+- Si falta nombre, agregá "nombre" en datos_faltantes.
+- Si falta dirección, agregá "direccion" en datos_faltantes.
+- Si falta pago, agregá "pago" en datos_faltantes.
+- Si falta horario de entrega, agregá "horario_entrega" en datos_faltantes.
+- El horario de entrega puede ser 12:00 o 17:00.
+- Si no hay pedido, respondé:
+{
+  "hay_pedido": false,
+  "pedido_completo": false,
+  "datos_faltantes": []
+}
+
+Mensaje del cliente:
+${text}
+      `,
+    });
+
+    let data;
+
+    try {
+      data = JSON.parse(limpiarJson(extractor.output_text));
+    } catch (error) {
+      console.log("No se pudo parsear JSON:", extractor.output_text);
+      data = {
+        hay_pedido: false,
+        pedido_completo: false,
+        datos_faltantes: [],
+      };
+    }
+
+    console.log("Datos extraídos:", data);
+
+    if (data.hay_pedido) {
+      const estado = data.pedido_completo
+        ? "Pedido completo"
+        : "Faltan datos: " + (data.datos_faltantes || []).join(", ");
+
+      await guardarPedido({
+        cliente: data.cliente,
+        telefono: from,
+        productos: data.productos,
+        direccion: data.direccion,
+        pago: data.pago,
+        horario_entrega: data.horario_entrega,
+        estado,
+      });
+    }
+
+    let instruccionesRespuesta = "";
+
+    if (data.hay_pedido && !data.pedido_completo) {
+      instruccionesRespuesta = `
+El cliente hizo un pedido pero faltan estos datos: ${(data.datos_faltantes || []).join(", ")}.
+Pedile esos datos de forma breve y amable.
+`;
+    } else if (data.hay_pedido && data.pedido_completo) {
+      instruccionesRespuesta = `
+El cliente hizo un pedido completo.
+Agradecé el pedido y avisá que un vendedor confirmará disponibilidad y precio final.
+`;
+    } else {
+      instruccionesRespuesta = `
+Respondé normalmente como asistente del autoservicio.
+`;
+    }
 
     const ai = await openai.responses.create({
       model: "gpt-4.1-mini",
@@ -111,74 +235,20 @@ Información del negocio:
 Reglas:
 - Respondé breve, amable y en español argentino.
 - Tomá pedidos.
-- Si faltan datos, pedí nombre, dirección, forma de pago y productos.
+- Si faltan datos, pedilos.
 - No confirmes stock.
 - No confirmes precio final.
 - Decí que un vendedor confirmará disponibilidad y precio final.
-- Si el cliente da un pedido completo, agradecé y decí que un vendedor confirmará.
 
-Mensaje del cliente: ${text}
+${instruccionesRespuesta}
+
+Mensaje del cliente:
+${text}
       `,
     });
 
     const reply =
       ai.output_text || "Gracias. Un vendedor te responderá en breve.";
-
-    const extractor = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: `
-Extraé datos de pedido del siguiente mensaje de WhatsApp.
-
-Respondé SOLO JSON válido, sin explicación.
-
-Considerá que hay un pedido completo si el mensaje incluye:
-- nombre del cliente
-- dirección
-- forma de pago
-- al menos un producto
-
-El horario de entrega es opcional.
-
-Si hay pedido completo, respondé:
-{
-  "pedido_completo": true,
-  "cliente": "",
-  "direccion": "",
-  "pago": "",
-  "productos": "",
-  "horario_entrega": ""
-}
-
-Si NO hay pedido completo, respondé:
-{
-  "pedido_completo": false
-}
-
-Mensaje:
-${text}
-      `,
-    });
-
-    let data;
-    try {
-      data = JSON.parse(extractor.output_text);
-    } catch (error) {
-      console.log("No se pudo parsear JSON del extractor:", extractor.output_text);
-      data = { pedido_completo: false };
-    }
-
-    console.log("Datos extraídos:", data);
-
-    if (data.pedido_completo) {
-      await guardarPedido({
-        cliente: data.cliente,
-        telefono: from,
-        productos: data.productos,
-        direccion: data.direccion,
-        pago: data.pago,
-        horario_entrega: data.horario_entrega,
-      });
-    }
 
     await axios.post(
       `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
@@ -210,6 +280,7 @@ ${text}
 });
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`Servidor activo en puerto ${PORT}`);
 });
