@@ -50,13 +50,11 @@ function normalizarHorario(horario) {
 
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
-
   if (!pedido.productos) faltantes.push("productos");
   if (!pedido.cliente) faltantes.push("nombre");
   if (!pedido.direccion) faltantes.push("direccion");
   if (!pedido.pago) faltantes.push("pago");
   if (!pedido.horario_entrega) faltantes.push("horario_entrega");
-
   return faltantes;
 }
 
@@ -70,7 +68,7 @@ function combinarPedido(anterior, nuevo) {
     cliente: nuevo.cliente || anterior.cliente || "",
     direccion: nuevo.direccion || anterior.direccion || "",
     pago: nuevo.pago || anterior.pago || "",
-    productos: nuevo.productos || anterior.productos || "",
+    productos: anterior.productos || "",
     horario_entrega: normalizarHorario(
       nuevo.horario_entrega || anterior.horario_entrega || ""
     ),
@@ -85,14 +83,14 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
 
   return catalogo
     .map((item) => {
-      const articuloNormalizado = normalizarTexto(item.articulo);
+      const art = normalizarTexto(item.articulo);
       let puntaje = 0;
 
       for (const palabra of palabras) {
-        if (articuloNormalizado.includes(palabra)) puntaje += 1;
+        if (art.includes(palabra)) puntaje += 1;
       }
 
-      if (articuloNormalizado.includes(q)) puntaje += 3;
+      if (art.includes(q)) puntaje += 3;
 
       return { ...item, puntaje };
     })
@@ -134,19 +132,10 @@ async function obtenerCatalogo() {
   catalogoUltimaCarga = ahora;
 
   console.log("Catálogo cargado:", catalogoCache.length, "productos");
-
   return catalogoCache;
 }
 
-async function guardarPedido({
-  cliente,
-  telefono,
-  productos,
-  direccion,
-  pago,
-  horario_entrega,
-  estado,
-}) {
+async function guardarPedido({ cliente, telefono, productos, direccion, pago, horario_entrega, estado }) {
   const auth = new google.auth.JWT(
     GOOGLE_CLIENT_EMAIL,
     null,
@@ -173,23 +162,11 @@ async function guardarPedido({
     range: "Hoja 1!A:I",
     valueInputOption: "USER_ENTERED",
     requestBody: {
-      values: [
-        [
-          fecha,
-          hora,
-          cliente || "",
-          telefono || "",
-          productos || "",
-          direccion || "",
-          pago || "",
-          horario_entrega || "",
-          estado || "Pedido completo",
-        ],
-      ],
+      values: [[fecha, hora, cliente, telefono, productos, direccion, pago, horario_entrega, estado]],
     },
   });
 
-  console.log("Pedido completo guardado en Google Sheets");
+  console.log("Pedido guardado en Google Sheets");
 }
 
 async function enviarWhatsApp(to, body) {
@@ -212,6 +189,90 @@ async function enviarWhatsApp(to, body) {
       },
     }
   );
+}
+
+async function finalizarOSolicitarDatos(from, pedidoActual) {
+  const faltantes = calcularDatosFaltantes(pedidoActual);
+
+  if (faltantes.length === 0) {
+    await guardarPedido({
+      cliente: pedidoActual.cliente,
+      telefono: from,
+      productos: pedidoActual.productos,
+      direccion: pedidoActual.direccion,
+      pago: pedidoActual.pago,
+      horario_entrega: pedidoActual.horario_entrega,
+      estado: "Pedido completo",
+    });
+
+    delete pedidosEnCurso[from];
+    delete seleccionesPendientes[from];
+
+    await enviarWhatsApp(
+      from,
+      "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
+    );
+
+    return;
+  }
+
+  pedidosEnCurso[from] = pedidoActual;
+
+  await enviarWhatsApp(
+    from,
+    `Gracias. Para completar el pedido, pasame: ${faltantes.join(", ")}.`
+  );
+}
+
+async function procesarProductos(from, catalogo, pedidoActual, productosPendientes) {
+  while (productosPendientes.length > 0) {
+    const prod = productosPendientes.shift();
+
+    const cantidad = prod.cantidad || 1;
+    const busqueda = prod.busqueda || "";
+
+    const opciones = buscarEnCatalogo(catalogo, busqueda, 5);
+
+    if (opciones.length === 0) {
+      pedidoActual.productos = agregarProducto(
+        pedidoActual.productos,
+        `${cantidad} ${busqueda}`
+      );
+      continue;
+    }
+
+    if (opciones.length === 1) {
+      pedidoActual.productos = agregarProducto(
+        pedidoActual.productos,
+        `${cantidad} ${opciones[0].articulo}`
+      );
+      continue;
+    }
+
+    pedidosEnCurso[from] = pedidoActual;
+
+    seleccionesPendientes[from] = {
+      cantidad,
+      busqueda,
+      opciones,
+      productosPendientes,
+    };
+
+    let mensaje = `Encontré varias opciones para "${busqueda}":\n\n`;
+
+    opciones.forEach((op, i) => {
+      mensaje += `${i + 1}. ${op.articulo}\n`;
+    });
+
+    mensaje += "\nRespondé con el número de la opción que querés.";
+
+    await enviarWhatsApp(from, mensaje);
+    return false;
+  }
+
+  pedidosEnCurso[from] = pedidoActual;
+  await finalizarOSolicitarDatos(from, pedidoActual);
+  return true;
 }
 
 app.get("/", (req, res) => {
@@ -262,54 +323,30 @@ app.post("/webhook", async (req, res) => {
       horario_entrega: "",
     };
 
-    // Si el cliente responde con número para elegir producto
     if (seleccionesPendientes[from]) {
       const opcion = parseInt(text, 10);
       const pendiente = seleccionesPendientes[from];
 
-      if (!isNaN(opcion) && opcion >= 1 && opcion <= pendiente.opciones.length) {
-        const elegido = pendiente.opciones[opcion - 1];
-        const productoFinal = `${pendiente.cantidad} ${elegido.articulo}`;
-
-        const pedidoActual = {
-          ...pedidoAnterior,
-          productos: agregarProducto(pedidoAnterior.productos, productoFinal),
-        };
-
-        pedidosEnCurso[from] = pedidoActual;
-        delete seleccionesPendientes[from];
-
-        const faltantes = calcularDatosFaltantes(pedidoActual);
-
-        if (faltantes.length === 0) {
-          await guardarPedido({
-            cliente: pedidoActual.cliente,
-            telefono: from,
-            productos: pedidoActual.productos,
-            direccion: pedidoActual.direccion,
-            pago: pedidoActual.pago,
-            horario_entrega: pedidoActual.horario_entrega,
-            estado: "Pedido completo",
-          });
-
-          delete pedidosEnCurso[from];
-
-          await enviarWhatsApp(
-            from,
-            "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
-          );
-        } else {
-          await enviarWhatsApp(
-            from,
-            `Perfecto, agregué:\n${productoFinal}\n\nAhora pasame: ${faltantes.join(", ")}.`
-          );
-        }
-
-        return res.sendStatus(200);
-      } else {
+      if (isNaN(opcion) || opcion < 1 || opcion > pendiente.opciones.length) {
         await enviarWhatsApp(from, "Respondé con el número de una de las opciones.");
         return res.sendStatus(200);
       }
+
+      const elegido = pendiente.opciones[opcion - 1];
+      const productoFinal = `${pendiente.cantidad} ${elegido.articulo}`;
+
+      let pedidoActual = {
+        ...pedidoAnterior,
+        productos: agregarProducto(pedidoAnterior.productos, productoFinal),
+      };
+
+      const productosPendientes = pendiente.productosPendientes || [];
+
+      delete seleccionesPendientes[from];
+
+      await procesarProductos(from, catalogo, pedidoActual, productosPendientes);
+
+      return res.sendStatus(200);
     }
 
     const extractor = await openai.responses.create({
@@ -342,13 +379,23 @@ Devolvé este formato:
 }
 
 Reglas:
-- Si el cliente pide productos, ponelos en productos_buscados.
+- Si el cliente pide productos, ponelos todos en productos_buscados.
+- Si dice "quiero mayonesa hellmanns, tres cocas y 1 azucar", devolvé:
+  mayonesa hellmanns cantidad 1,
+  coca cantidad 3,
+  azucar cantidad 1.
 - Si dice "quiero 2 coca, azúcar y tres leches", devolvé:
-  coca cantidad 2, azúcar cantidad 1, leches cantidad 3.
+  coca cantidad 2,
+  azúcar cantidad 1,
+  leche cantidad 3.
+- Convertí cantidades escritas en letras a números: una=1, un=1, dos=2, tres=3, cuatro=4, cinco=5.
 - Si no dice cantidad, asumí 1.
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
 - Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
+- No preguntes por monto mínimo.
+- No confirmes stock.
+- No confirmes precio final.
 - Si no hay pedido ni datos de pedido, hay_pedido false.
       `,
     });
@@ -371,91 +418,23 @@ Reglas:
 
     console.log("Datos extraídos:", data);
 
-    let pedidoActual = combinarPedido(pedidoAnterior, {
-      cliente: data.cliente,
-      direccion: data.direccion,
-      pago: data.pago,
-      productos: "",
-      horario_entrega: data.horario_entrega,
-    });
-
-    const productosBuscados = data.productos_buscados || [];
-
-    for (const prod of productosBuscados) {
-      const cantidad = prod.cantidad || 1;
-      const busqueda = prod.busqueda || "";
-
-      const opciones = buscarEnCatalogo(catalogo, busqueda, 5);
-
-      if (opciones.length === 0) {
-        pedidoActual.productos = agregarProducto(
-          pedidoActual.productos,
-          `${cantidad} ${busqueda}`
-        );
-        continue;
-      }
-
-      if (opciones.length === 1) {
-        pedidoActual.productos = agregarProducto(
-          pedidoActual.productos,
-          `${cantidad} ${opciones[0].articulo}`
-        );
-        continue;
-      }
-
-      pedidosEnCurso[from] = pedidoActual;
-      seleccionesPendientes[from] = {
-        cantidad,
-        busqueda,
-        opciones,
-      };
-
-      let mensaje = `Encontré varias opciones para "${busqueda}":\n\n`;
-
-      opciones.forEach((op, i) => {
-        mensaje += `${i + 1}. ${op.articulo}\n`;
+    if (data.hay_pedido) {
+      let pedidoActual = combinarPedido(pedidoAnterior, {
+        cliente: data.cliente,
+        direccion: data.direccion,
+        pago: data.pago,
+        horario_entrega: data.horario_entrega,
       });
 
-      mensaje += "\nRespondé con el número de la opción que querés.";
+      const productosBuscados = data.productos_buscados || [];
 
-      await enviarWhatsApp(from, mensaje);
-      return res.sendStatus(200);
-    }
-
-    if (data.hay_pedido) {
-      pedidosEnCurso[from] = pedidoActual;
-
-      const faltantes = calcularDatosFaltantes(pedidoActual);
-
-      console.log("Pedido actualizado:", pedidoActual);
-      console.log("Datos faltantes:", faltantes);
-
-      if (faltantes.length === 0) {
-        await guardarPedido({
-          cliente: pedidoActual.cliente,
-          telefono: from,
-          productos: pedidoActual.productos,
-          direccion: pedidoActual.direccion,
-          pago: pedidoActual.pago,
-          horario_entrega: pedidoActual.horario_entrega,
-          estado: "Pedido completo",
-        });
-
-        delete pedidosEnCurso[from];
-
-        await enviarWhatsApp(
-          from,
-          "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
-        );
-
+      if (productosBuscados.length > 0) {
+        await procesarProductos(from, catalogo, pedidoActual, productosBuscados);
         return res.sendStatus(200);
       }
 
-      await enviarWhatsApp(
-        from,
-        `Gracias. Para completar el pedido, pasame: ${faltantes.join(", ")}.`
-      );
-
+      pedidosEnCurso[from] = pedidoActual;
+      await finalizarOSolicitarDatos(from, pedidoActual);
       return res.sendStatus(200);
     }
 
@@ -472,7 +451,11 @@ Información:
 - Horarios de entrega: 12:00 y 17:00.
 - Medios de pago: todos los medios en 1 cuota.
 
-Respondé breve, amable y en español argentino.
+Reglas:
+- Respondé breve, amable y en español argentino.
+- No confirmes stock.
+- No confirmes precio final.
+- Un vendedor confirmará disponibilidad y precio final.
 
 Mensaje del cliente:
 ${text}
