@@ -1,4 +1,6 @@
-const express = require("express");
+from pathlib import Path
+
+code = r'''const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
 const { google } = require("googleapis");
@@ -40,6 +42,7 @@ function normalizarTexto(texto) {
 
 function normalizarHorario(horario) {
   if (!horario) return "";
+
   const h = String(horario).toLowerCase();
 
   if (h.includes("12") || h.includes("mediod")) return "12:00";
@@ -50,11 +53,13 @@ function normalizarHorario(horario) {
 
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
+
   if (!pedido.productos) faltantes.push("productos");
   if (!pedido.cliente) faltantes.push("nombre");
   if (!pedido.direccion) faltantes.push("direccion");
   if (!pedido.pago) faltantes.push("pago");
   if (!pedido.horario_entrega) faltantes.push("horario_entrega");
+
   return faltantes;
 }
 
@@ -75,71 +80,117 @@ function combinarPedido(anterior, nuevo) {
   };
 }
 
+// BUSCADOR MEJORADO DE CATALOGO
 function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
   const q = normalizarTexto(busqueda);
 
   if (!q || q.length < 2) return [];
 
-  const palabras = q.split(" ").filter(Boolean);
+  const palabras = q.split(" ").filter((p) => p.length > 1);
 
   return catalogo
     .map((item) => {
       const art = normalizarTexto(item.articulo);
+      const palabrasArticulo = art.split(" ").filter(Boolean);
 
       let puntaje = 0;
 
-      // Coincidencia exacta
-      if (art === q) puntaje += 1000;
+      // 1) Coincidencia exacta total
+      if (art === q) {
+        puntaje += 1000;
+      }
 
-      // Prioriza artículos que empiezan con la búsqueda completa
-      if (art.startsWith(q)) puntaje += 800;
+      // 2) El artículo empieza con la búsqueda completa
+      if (art.startsWith(q)) {
+        puntaje += 850;
+      }
 
-      // Prioriza cuando aparece como palabra exacta
-      const regex = new RegExp(`\b${q}\b`, "i");
-      if (regex.test(art)) puntaje += 500;
+      // 3) La búsqueda aparece como palabra exacta
+      const regexBusquedaExacta = new RegExp(`\\b${q}\\b`, "i");
+      if (regexBusquedaExacta.test(art)) {
+        puntaje += 600;
+      }
 
-      // Contiene la frase completa
-      if (art.includes(q)) puntaje += 250;
+      // 4) Contiene la frase completa
+      if (art.includes(q)) {
+        puntaje += 300;
+      }
 
-      // Coincidencias por cada palabra buscada
+      // 5) Priorizar si la primera palabra del artículo coincide
+      if (palabrasArticulo[0] === q) {
+        puntaje += 500;
+      }
+
+      // 6) Coincidencias por cada palabra buscada
       for (const palabra of palabras) {
-        if (art.includes(palabra)) {
-          puntaje += 50;
+        const regexPalabra = new RegExp(`\\b${palabra}\\b`, "i");
+
+        if (regexPalabra.test(art)) {
+          puntaje += 180;
+        } else if (art.includes(palabra)) {
+          puntaje += 70;
+        }
+
+        if (palabrasArticulo[0] === palabra) {
+          puntaje += 250;
         }
       }
 
-      // Penaliza productos que NO deberían aparecer arriba
-      // cuando el cliente busca azúcar común.
-      const penalizaciones = [
+      // 7) Penalizar productos que no suelen ser lo que el cliente busca
+      const penalizacionesGenerales = [
         "sin azucar",
         "cero azucar",
         "0 azucar",
         "zero azucar",
+        "zero sugar",
+        "sugar free",
         "light",
         "diet",
-        "sin sugar",
-        "sugar free"
+        "sin sal",
+        "bajo sodio"
       ];
 
-      for (const penalizacion of penalizaciones) {
+      for (const penalizacion of penalizacionesGenerales) {
         if (art.includes(penalizacion)) {
-          puntaje -= 600;
+          puntaje -= 700;
         }
       }
 
-      // Caso especial para azúcar:
-      // si el cliente busca "azucar", prioriza productos que arrancan con AZUCAR.
+      // 8) Caso especial: si el cliente busca AZUCAR, priorizar azúcar real
       if (q === "azucar") {
         if (art.startsWith("azucar")) {
-          puntaje += 500;
+          puntaje += 900;
         } else {
-          puntaje -= 300;
+          puntaje -= 450;
+        }
+
+        if (
+          art.includes("sin azucar") ||
+          art.includes("cero azucar") ||
+          art.includes("0 azucar") ||
+          art.includes("zero")
+        ) {
+          puntaje -= 1000;
+        }
+      }
+
+      // 9) Caso especial: si busca COCA, priorizar productos que empiezan con coca/coca cola
+      if (q === "coca") {
+        if (art.startsWith("coca") || art.startsWith("coca cola")) {
+          puntaje += 700;
+        }
+      }
+
+      // 10) Caso especial: si busca MAYONESA, priorizar productos que empiezan con mayonesa
+      if (q.includes("mayonesa")) {
+        if (art.startsWith("mayonesa")) {
+          puntaje += 700;
         }
       }
 
       return {
         ...item,
-        puntaje
+        puntaje,
       };
     })
     .filter((item) => item.puntaje > 0)
@@ -180,10 +231,19 @@ async function obtenerCatalogo() {
   catalogoUltimaCarga = ahora;
 
   console.log("Catálogo cargado:", catalogoCache.length, "productos");
+
   return catalogoCache;
 }
 
-async function guardarPedido({ cliente, telefono, productos, direccion, pago, horario_entrega, estado }) {
+async function guardarPedido({
+  cliente,
+  telefono,
+  productos,
+  direccion,
+  pago,
+  horario_entrega,
+  estado,
+}) {
   const auth = new google.auth.JWT(
     GOOGLE_CLIENT_EMAIL,
     null,
@@ -210,7 +270,19 @@ async function guardarPedido({ cliente, telefono, productos, direccion, pago, ho
     range: "Hoja 1!A:I",
     valueInputOption: "USER_ENTERED",
     requestBody: {
-      values: [[fecha, hora, cliente, telefono, productos, direccion, pago, horario_entrega, estado]],
+      values: [
+        [
+          fecha,
+          hora,
+          cliente,
+          telefono,
+          productos,
+          direccion,
+          pago,
+          horario_entrega,
+          estado,
+        ],
+      ],
     },
   });
 
@@ -281,19 +353,29 @@ async function procesarProductos(from, catalogo, pedidoActual, productosPendient
 
     const opciones = buscarEnCatalogo(catalogo, busqueda, 5);
 
+    console.log("BUSQUEDA:", busqueda);
+
     if (opciones.length === 0) {
+      console.log("Sin coincidencias para:", busqueda);
+
       pedidoActual.productos = agregarProducto(
         pedidoActual.productos,
         `${cantidad} ${busqueda}`
       );
+
       continue;
     }
+
+    opciones.forEach((op, i) => {
+      console.log(`${i + 1}. ${op.articulo} (${op.puntaje})`);
+    });
 
     if (opciones.length === 1) {
       pedidoActual.productos = agregarProducto(
         pedidoActual.productos,
         `${cantidad} ${opciones[0].articulo}`
       );
+
       continue;
     }
 
@@ -315,11 +397,14 @@ async function procesarProductos(from, catalogo, pedidoActual, productosPendient
     mensaje += "\nRespondé con el número de la opción que querés.";
 
     await enviarWhatsApp(from, mensaje);
+
     return false;
   }
 
   pedidosEnCurso[from] = pedidoActual;
+
   await finalizarOSolicitarDatos(from, pedidoActual);
+
   return true;
 }
 
@@ -361,6 +446,7 @@ app.post("/webhook", async (req, res) => {
     console.log("Texto recibido:", text);
 
     const catalogo = await obtenerCatalogo();
+
     console.log("Productos en catálogo:", catalogo.length);
 
     const pedidoAnterior = pedidosEnCurso[from] || {
@@ -376,7 +462,11 @@ app.post("/webhook", async (req, res) => {
       const pendiente = seleccionesPendientes[from];
 
       if (isNaN(opcion) || opcion < 1 || opcion > pendiente.opciones.length) {
-        await enviarWhatsApp(from, "Respondé con el número de una de las opciones.");
+        await enviarWhatsApp(
+          from,
+          "Respondé con el número de una de las opciones."
+        );
+
         return res.sendStatus(200);
       }
 
@@ -454,6 +544,7 @@ Reglas:
       data = JSON.parse(limpiarJson(extractor.output_text));
     } catch (error) {
       console.log("No se pudo parsear JSON:", extractor.output_text);
+
       data = {
         hay_pedido: false,
         cliente: "",
@@ -478,11 +569,14 @@ Reglas:
 
       if (productosBuscados.length > 0) {
         await procesarProductos(from, catalogo, pedidoActual, productosBuscados);
+
         return res.sendStatus(200);
       }
 
       pedidosEnCurso[from] = pedidoActual;
+
       await finalizarOSolicitarDatos(from, pedidoActual);
+
       return res.sendStatus(200);
     }
 
@@ -518,6 +612,7 @@ ${text}
     return res.sendStatus(200);
   } catch (error) {
     console.error("Error completo:", error.response?.data || error.message);
+
     return res.sendStatus(200);
   }
 });
@@ -527,3 +622,8 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor activo en puerto ${PORT}`);
 });
+'''
+
+path = Path("/mnt/data/server_js_completo_con_logs_buscador.txt")
+path.write_text(code, encoding="utf-8")
+path
