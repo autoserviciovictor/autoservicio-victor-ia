@@ -21,20 +21,15 @@ const pedidosEnCurso = {};
 
 function limpiarJson(texto) {
   if (!texto) return "{}";
-
-  return texto
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
+  return texto.replace(/```json/g, "").replace(/```/g, "").trim();
 }
 
 function normalizarHorario(horario) {
   if (!horario) return "";
-
   const h = String(horario).toLowerCase();
 
-  if (h.includes("12")) return "12:00";
-  if (h.includes("17") || h.includes("5")) return "17:00";
+  if (h.includes("12") || h.includes("mediod")) return "12:00";
+  if (h.includes("17") || h.includes("5") || h.includes("tarde")) return "17:00";
 
   return horario;
 }
@@ -108,13 +103,13 @@ async function guardarPedido({
           direccion || "",
           pago || "",
           horario_entrega || "",
-          estado || "Pendiente",
+          estado || "Pedido completo",
         ],
       ],
     },
   });
 
-  console.log("Pedido guardado en Google Sheets");
+  console.log("Pedido completo guardado en Google Sheets");
 }
 
 app.get("/", (req, res) => {
@@ -185,23 +180,14 @@ Detectá como pedido si:
 - dice "quiero", "necesito", "te encargo", "mandame", "anotame", "pedido", "comprar"
 - enumera productos aunque falten datos
 
-Datos posibles:
-- cliente / nombre
-- direccion
-- pago
-- productos
-- horario_entrega
-
-Reglas importantes:
+Reglas:
 - Si el mensaje nuevo solo trae nombre, dirección, pago y horario, pero el pedido anterior tenía productos, conservá los productos anteriores.
 - Si el mensaje nuevo trae productos nuevos, reemplazá productos por los nuevos.
-- Si el mensaje nuevo completa un dato faltante, usalo.
 - Si dice "Agustín, San Juan 573, efectivo, 12hs", extraé:
   cliente: "Agustín"
   direccion: "San Juan 573"
   pago: "efectivo"
   horario_entrega: "12:00"
-- Horarios válidos: 12:00 o 17:00.
 - Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
 
@@ -260,23 +246,19 @@ Si no hay pedido ni datos de pedido:
       console.log("Pedido actualizado:", pedidoActual);
       console.log("Datos faltantes:", datosFaltantes);
 
-      const estado = pedidoCompleto
-        ? "Pedido completo"
-        : "Faltan datos: " + datosFaltantes.join(", ");
-
-      await guardarPedido({
-        cliente: pedidoActual.cliente,
-        telefono: from,
-        productos: pedidoActual.productos,
-        direccion: pedidoActual.direccion,
-        pago: pedidoActual.pago,
-        horario_entrega: pedidoActual.horario_entrega,
-        estado,
-      });
-
       if (pedidoCompleto) {
+        await guardarPedido({
+          cliente: pedidoActual.cliente,
+          telefono: from,
+          productos: pedidoActual.productos,
+          direccion: pedidoActual.direccion,
+          pago: pedidoActual.pago,
+          horario_entrega: pedidoActual.horario_entrega,
+          estado: "Pedido completo",
+        });
+
         delete pedidosEnCurso[from];
-        console.log("Pedido completo. Memoria limpiada para:", from);
+        console.log("Memoria limpiada para:", from);
       }
     }
 
