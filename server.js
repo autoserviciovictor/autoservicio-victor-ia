@@ -17,6 +17,7 @@ const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n")
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 const mensajesProcesados = new Set();
+const pedidosEnCurso = {};
 
 function limpiarJson(texto) {
   if (!texto) return "{}";
@@ -25,6 +26,41 @@ function limpiarJson(texto) {
     .replace(/```json/g, "")
     .replace(/```/g, "")
     .trim();
+}
+
+function normalizarHorario(horario) {
+  if (!horario) return "";
+
+  const h = String(horario).toLowerCase();
+
+  if (h.includes("12")) return "12:00";
+  if (h.includes("17") || h.includes("5")) return "17:00";
+
+  return horario;
+}
+
+function combinarPedido(anterior, nuevo) {
+  return {
+    cliente: nuevo.cliente || anterior.cliente || "",
+    direccion: nuevo.direccion || anterior.direccion || "",
+    pago: nuevo.pago || anterior.pago || "",
+    productos: nuevo.productos || anterior.productos || "",
+    horario_entrega: normalizarHorario(
+      nuevo.horario_entrega || anterior.horario_entrega || ""
+    ),
+  };
+}
+
+function calcularDatosFaltantes(pedido) {
+  const faltantes = [];
+
+  if (!pedido.productos) faltantes.push("productos");
+  if (!pedido.cliente) faltantes.push("nombre");
+  if (!pedido.direccion) faltantes.push("direccion");
+  if (!pedido.pago) faltantes.push("pago");
+  if (!pedido.horario_entrega) faltantes.push("horario_entrega");
+
+  return faltantes;
 }
 
 async function guardarPedido({
@@ -115,58 +151,80 @@ app.post("/webhook", async (req, res) => {
     const from = message.from;
     const text = message.text.body;
 
+    const pedidoAnterior = pedidosEnCurso[from] || {
+      cliente: "",
+      direccion: "",
+      pago: "",
+      productos: "",
+      horario_entrega: "",
+    };
+
     console.log("Mensaje recibido de:", from);
     console.log("Texto recibido:", text);
+    console.log("Pedido anterior:", pedidoAnterior);
 
     const extractor = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: `
-Extraé datos de un posible pedido de WhatsApp para un autoservicio.
+Extraé datos de pedido de WhatsApp para un autoservicio.
 
 Respondé SOLO JSON válido. No expliques nada.
 
-Detectá como pedido si el cliente:
-- pide productos
-- dice "quiero", "necesito", "te encargo", "mandame", "anotame", "pedido", "comprar"
-- enumera productos aunque falten nombre, dirección o pago
+Tenés un pedido anterior y un mensaje nuevo.
+Combiná ambos para formar el pedido actualizado.
 
-Productos pueden venir así:
-- "2 coca, 1 pan"
-- "coca x2"
-- "yerba, azúcar y leche"
-- "necesito fideos aceite galletitas"
-- "te encargo arroz x2 azúcar x1"
+Pedido anterior:
+${JSON.stringify(pedidoAnterior)}
+
+Mensaje nuevo del cliente:
+${text}
+
+Detectá como pedido si:
+- pide productos
+- completa datos de un pedido anterior
+- dice "quiero", "necesito", "te encargo", "mandame", "anotame", "pedido", "comprar"
+- enumera productos aunque falten datos
+
+Datos posibles:
+- cliente / nombre
+- direccion
+- pago
+- productos
+- horario_entrega
+
+Reglas importantes:
+- Si el mensaje nuevo solo trae nombre, dirección, pago y horario, pero el pedido anterior tenía productos, conservá los productos anteriores.
+- Si el mensaje nuevo trae productos nuevos, reemplazá productos por los nuevos.
+- Si el mensaje nuevo completa un dato faltante, usalo.
+- Si dice "Agustín, San Juan 573, efectivo, 12hs", extraé:
+  cliente: "Agustín"
+  direccion: "San Juan 573"
+  pago: "efectivo"
+  horario_entrega: "12:00"
+- Horarios válidos: 12:00 o 17:00.
+- Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
+- Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
 
 Devolvé este formato:
 
 {
   "hay_pedido": true,
-  "pedido_completo": true,
   "cliente": "",
   "direccion": "",
   "pago": "",
   "productos": "",
-  "horario_entrega": "",
-  "datos_faltantes": []
+  "horario_entrega": ""
 }
 
-Reglas:
-- "hay_pedido" es true si hay productos o intención clara de comprar.
-- "pedido_completo" es true solo si tiene productos, nombre, dirección y forma de pago.
-- Si falta nombre, agregá "nombre" en datos_faltantes.
-- Si falta dirección, agregá "direccion" en datos_faltantes.
-- Si falta pago, agregá "pago" en datos_faltantes.
-- Si falta horario de entrega, agregá "horario_entrega" en datos_faltantes.
-- El horario de entrega puede ser 12:00 o 17:00.
-- Si no hay pedido, respondé:
+Si no hay pedido ni datos de pedido:
 {
   "hay_pedido": false,
-  "pedido_completo": false,
-  "datos_faltantes": []
+  "cliente": "",
+  "direccion": "",
+  "pago": "",
+  "productos": "",
+  "horario_entrega": ""
 }
-
-Mensaje del cliente:
-${text}
       `,
     });
 
@@ -178,39 +236,68 @@ ${text}
       console.log("No se pudo parsear JSON:", extractor.output_text);
       data = {
         hay_pedido: false,
-        pedido_completo: false,
-        datos_faltantes: [],
+        cliente: "",
+        direccion: "",
+        pago: "",
+        productos: "",
+        horario_entrega: "",
       };
     }
 
     console.log("Datos extraídos:", data);
 
+    let pedidoActual = pedidoAnterior;
+    let datosFaltantes = [];
+    let pedidoCompleto = false;
+
     if (data.hay_pedido) {
-      const estado = data.pedido_completo
+      pedidoActual = combinarPedido(pedidoAnterior, data);
+      pedidosEnCurso[from] = pedidoActual;
+
+      datosFaltantes = calcularDatosFaltantes(pedidoActual);
+      pedidoCompleto = datosFaltantes.length === 0;
+
+      console.log("Pedido actualizado:", pedidoActual);
+      console.log("Datos faltantes:", datosFaltantes);
+
+      const estado = pedidoCompleto
         ? "Pedido completo"
-        : "Faltan datos: " + (data.datos_faltantes || []).join(", ");
+        : "Faltan datos: " + datosFaltantes.join(", ");
 
       await guardarPedido({
-        cliente: data.cliente,
+        cliente: pedidoActual.cliente,
         telefono: from,
-        productos: data.productos,
-        direccion: data.direccion,
-        pago: data.pago,
-        horario_entrega: data.horario_entrega,
+        productos: pedidoActual.productos,
+        direccion: pedidoActual.direccion,
+        pago: pedidoActual.pago,
+        horario_entrega: pedidoActual.horario_entrega,
         estado,
       });
+
+      if (pedidoCompleto) {
+        delete pedidosEnCurso[from];
+        console.log("Pedido completo. Memoria limpiada para:", from);
+      }
     }
 
     let instruccionesRespuesta = "";
 
-    if (data.hay_pedido && !data.pedido_completo) {
+    if (data.hay_pedido && !pedidoCompleto) {
       instruccionesRespuesta = `
-El cliente hizo un pedido pero faltan estos datos: ${(data.datos_faltantes || []).join(", ")}.
-Pedile esos datos de forma breve y amable.
+El cliente está armando un pedido.
+Pedido actual:
+${JSON.stringify(pedidoActual)}
+
+Faltan estos datos:
+${datosFaltantes.join(", ")}
+
+Pedile SOLO los datos faltantes de forma breve.
 `;
-    } else if (data.hay_pedido && data.pedido_completo) {
+    } else if (data.hay_pedido && pedidoCompleto) {
       instruccionesRespuesta = `
-El cliente hizo un pedido completo.
+El pedido está completo:
+${JSON.stringify(pedidoActual)}
+
 Agradecé el pedido y avisá que un vendedor confirmará disponibilidad y precio final.
 `;
     } else {
@@ -234,11 +321,12 @@ Información del negocio:
 
 Reglas:
 - Respondé breve, amable y en español argentino.
-- Tomá pedidos.
-- Si faltan datos, pedilos.
 - No confirmes stock.
 - No confirmes precio final.
-- Decí que un vendedor confirmará disponibilidad y precio final.
+- Siempre decí que un vendedor confirmará disponibilidad y precio final.
+- Si faltan datos, pedí solo los datos faltantes.
+- No vuelvas a pedir productos si ya están en el pedido actual.
+- No vuelvas a pedir nombre, dirección, pago u horario si ya están en el pedido actual.
 
 ${instruccionesRespuesta}
 
