@@ -18,6 +18,7 @@ const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 const mensajesProcesados = new Set();
 const pedidosEnCurso = {};
+const seleccionesPendientes = {};
 
 let catalogoCache = [];
 let catalogoUltimaCarga = 0;
@@ -25,6 +26,16 @@ let catalogoUltimaCarga = 0;
 function limpiarJson(texto) {
   if (!texto) return "{}";
   return texto.replace(/```json/g, "").replace(/```/g, "").trim();
+}
+
+function normalizarTexto(texto) {
+  return String(texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizarHorario(horario) {
@@ -35,6 +46,23 @@ function normalizarHorario(horario) {
   if (h.includes("17") || h.includes("5") || h.includes("tarde")) return "17:00";
 
   return horario;
+}
+
+function calcularDatosFaltantes(pedido) {
+  const faltantes = [];
+
+  if (!pedido.productos) faltantes.push("productos");
+  if (!pedido.cliente) faltantes.push("nombre");
+  if (!pedido.direccion) faltantes.push("direccion");
+  if (!pedido.pago) faltantes.push("pago");
+  if (!pedido.horario_entrega) faltantes.push("horario_entrega");
+
+  return faltantes;
+}
+
+function agregarProducto(productosActuales, nuevoProducto) {
+  if (!productosActuales) return nuevoProducto;
+  return productosActuales + "\n" + nuevoProducto;
 }
 
 function combinarPedido(anterior, nuevo) {
@@ -49,16 +77,28 @@ function combinarPedido(anterior, nuevo) {
   };
 }
 
-function calcularDatosFaltantes(pedido) {
-  const faltantes = [];
+function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
+  const q = normalizarTexto(busqueda);
+  if (!q || q.length < 2) return [];
 
-  if (!pedido.productos) faltantes.push("productos");
-  if (!pedido.cliente) faltantes.push("nombre");
-  if (!pedido.direccion) faltantes.push("direccion");
-  if (!pedido.pago) faltantes.push("pago");
-  if (!pedido.horario_entrega) faltantes.push("horario_entrega");
+  const palabras = q.split(" ").filter((p) => p.length > 1);
 
-  return faltantes;
+  return catalogo
+    .map((item) => {
+      const articuloNormalizado = normalizarTexto(item.articulo);
+      let puntaje = 0;
+
+      for (const palabra of palabras) {
+        if (articuloNormalizado.includes(palabra)) puntaje += 1;
+      }
+
+      if (articuloNormalizado.includes(q)) puntaje += 3;
+
+      return { ...item, puntaje };
+    })
+    .filter((item) => item.puntaje > 0)
+    .sort((a, b) => b.puntaje - a.puntaje)
+    .slice(0, limite);
 }
 
 async function obtenerCatalogo() {
@@ -152,6 +192,28 @@ async function guardarPedido({
   console.log("Pedido completo guardado en Google Sheets");
 }
 
+async function enviarWhatsApp(to, body) {
+  await axios.post(
+    `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "542994654375",
+      type: "text",
+      text: {
+        preview_url: false,
+        body,
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+}
+
 app.get("/", (req, res) => {
   res.send("Servidor Autoservicio Victor IA funcionando");
 });
@@ -184,7 +246,7 @@ app.post("/webhook", async (req, res) => {
     mensajesProcesados.add(message.id);
 
     const from = message.from;
-    const text = message.text.body;
+    const text = message.text.body.trim();
 
     console.log("Mensaje recibido de:", from);
     console.log("Texto recibido:", text);
@@ -200,50 +262,68 @@ app.post("/webhook", async (req, res) => {
       horario_entrega: "",
     };
 
-    console.log("Pedido anterior:", pedidoAnterior);
+    // Si el cliente responde con número para elegir producto
+    if (seleccionesPendientes[from]) {
+      const opcion = parseInt(text, 10);
+      const pendiente = seleccionesPendientes[from];
+
+      if (!isNaN(opcion) && opcion >= 1 && opcion <= pendiente.opciones.length) {
+        const elegido = pendiente.opciones[opcion - 1];
+        const productoFinal = `${pendiente.cantidad} ${elegido.articulo}`;
+
+        const pedidoActual = {
+          ...pedidoAnterior,
+          productos: agregarProducto(pedidoAnterior.productos, productoFinal),
+        };
+
+        pedidosEnCurso[from] = pedidoActual;
+        delete seleccionesPendientes[from];
+
+        const faltantes = calcularDatosFaltantes(pedidoActual);
+
+        if (faltantes.length === 0) {
+          await guardarPedido({
+            cliente: pedidoActual.cliente,
+            telefono: from,
+            productos: pedidoActual.productos,
+            direccion: pedidoActual.direccion,
+            pago: pedidoActual.pago,
+            horario_entrega: pedidoActual.horario_entrega,
+            estado: "Pedido completo",
+          });
+
+          delete pedidosEnCurso[from];
+
+          await enviarWhatsApp(
+            from,
+            "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
+          );
+        } else {
+          await enviarWhatsApp(
+            from,
+            `Perfecto, agregué:\n${productoFinal}\n\nAhora pasame: ${faltantes.join(", ")}.`
+          );
+        }
+
+        return res.sendStatus(200);
+      } else {
+        await enviarWhatsApp(from, "Respondé con el número de una de las opciones.");
+        return res.sendStatus(200);
+      }
+    }
 
     const extractor = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: `
 Extraé datos de pedido de WhatsApp para un autoservicio.
 
-Respondé SOLO JSON válido. No expliques nada.
-
-Tenés un pedido anterior y un mensaje nuevo.
-Combiná ambos para formar el pedido actualizado.
+Respondé SOLO JSON válido.
 
 Pedido anterior:
 ${JSON.stringify(pedidoAnterior)}
 
-Mensaje nuevo del cliente:
+Mensaje nuevo:
 ${text}
-
-Detectá como pedido si:
-- pide productos
-- completa datos de un pedido anterior
-- dice "quiero", "necesito", "te encargo", "mandame", "anotame", "pedido", "comprar"
-- enumera productos aunque falten datos
-
-Reglas:
-- Formateá siempre los productos en múltiples líneas.
-- Si el cliente dice "coca x2", escribí "2 Coca".
-- Si el cliente dice "2 coca", escribí "2 Coca".
-- Si el cliente dice un producto sin cantidad, asumí cantidad 1.
-- No uses comas en productos.
-- Cada producto debe ir en una línea nueva.
-- Ejemplo: "coca x2, pan y leche" debe guardarse como:
-2 Coca
-1 Pan
-1 Leche
-- Si el mensaje nuevo solo trae nombre, dirección, pago y horario, pero el pedido anterior tenía productos, conservá los productos anteriores.
-- Si el mensaje nuevo trae productos nuevos, reemplazá productos por los nuevos.
-- Si dice "Agustín, San Juan 573, efectivo, 12hs", extraé:
-  cliente: "Agustín"
-  direccion: "San Juan 573"
-  pago: "efectivo"
-  horario_entrega: "12:00"
-- Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
-- Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
 
 Devolvé este formato:
 
@@ -252,19 +332,24 @@ Devolvé este formato:
   "cliente": "",
   "direccion": "",
   "pago": "",
-  "productos": "2 Coca\\n1 Pan\\n1 Leche",
-  "horario_entrega": ""
+  "horario_entrega": "",
+  "productos_buscados": [
+    {
+      "cantidad": 2,
+      "busqueda": "coca"
+    }
+  ]
 }
 
-Si no hay pedido ni datos de pedido:
-{
-  "hay_pedido": false,
-  "cliente": "",
-  "direccion": "",
-  "pago": "",
-  "productos": "",
-  "horario_entrega": ""
-}
+Reglas:
+- Si el cliente pide productos, ponelos en productos_buscados.
+- Si dice "quiero 2 coca, azúcar y tres leches", devolvé:
+  coca cantidad 2, azúcar cantidad 1, leches cantidad 3.
+- Si no dice cantidad, asumí 1.
+- Si completa datos personales, extraé cliente, dirección, pago y horario.
+- Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
+- Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
+- Si no hay pedido ni datos de pedido, hay_pedido false.
       `,
     });
 
@@ -279,28 +364,73 @@ Si no hay pedido ni datos de pedido:
         cliente: "",
         direccion: "",
         pago: "",
-        productos: "",
         horario_entrega: "",
+        productos_buscados: [],
       };
     }
 
     console.log("Datos extraídos:", data);
 
-    let pedidoActual = pedidoAnterior;
-    let datosFaltantes = [];
-    let pedidoCompleto = false;
+    let pedidoActual = combinarPedido(pedidoAnterior, {
+      cliente: data.cliente,
+      direccion: data.direccion,
+      pago: data.pago,
+      productos: "",
+      horario_entrega: data.horario_entrega,
+    });
+
+    const productosBuscados = data.productos_buscados || [];
+
+    for (const prod of productosBuscados) {
+      const cantidad = prod.cantidad || 1;
+      const busqueda = prod.busqueda || "";
+
+      const opciones = buscarEnCatalogo(catalogo, busqueda, 5);
+
+      if (opciones.length === 0) {
+        pedidoActual.productos = agregarProducto(
+          pedidoActual.productos,
+          `${cantidad} ${busqueda}`
+        );
+        continue;
+      }
+
+      if (opciones.length === 1) {
+        pedidoActual.productos = agregarProducto(
+          pedidoActual.productos,
+          `${cantidad} ${opciones[0].articulo}`
+        );
+        continue;
+      }
+
+      pedidosEnCurso[from] = pedidoActual;
+      seleccionesPendientes[from] = {
+        cantidad,
+        busqueda,
+        opciones,
+      };
+
+      let mensaje = `Encontré varias opciones para "${busqueda}":\n\n`;
+
+      opciones.forEach((op, i) => {
+        mensaje += `${i + 1}. ${op.articulo}\n`;
+      });
+
+      mensaje += "\nRespondé con el número de la opción que querés.";
+
+      await enviarWhatsApp(from, mensaje);
+      return res.sendStatus(200);
+    }
 
     if (data.hay_pedido) {
-      pedidoActual = combinarPedido(pedidoAnterior, data);
       pedidosEnCurso[from] = pedidoActual;
 
-      datosFaltantes = calcularDatosFaltantes(pedidoActual);
-      pedidoCompleto = datosFaltantes.length === 0;
+      const faltantes = calcularDatosFaltantes(pedidoActual);
 
       console.log("Pedido actualizado:", pedidoActual);
-      console.log("Datos faltantes:", datosFaltantes);
+      console.log("Datos faltantes:", faltantes);
 
-      if (pedidoCompleto) {
+      if (faltantes.length === 0) {
         await guardarPedido({
           cliente: pedidoActual.cliente,
           telefono: from,
@@ -312,34 +442,21 @@ Si no hay pedido ni datos de pedido:
         });
 
         delete pedidosEnCurso[from];
-        console.log("Memoria limpiada para:", from);
+
+        await enviarWhatsApp(
+          from,
+          "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
+        );
+
+        return res.sendStatus(200);
       }
-    }
 
-    let instruccionesRespuesta = "";
+      await enviarWhatsApp(
+        from,
+        `Gracias. Para completar el pedido, pasame: ${faltantes.join(", ")}.`
+      );
 
-    if (data.hay_pedido && !pedidoCompleto) {
-      instruccionesRespuesta = `
-El cliente está armando un pedido.
-Pedido actual:
-${JSON.stringify(pedidoActual)}
-
-Faltan estos datos:
-${datosFaltantes.join(", ")}
-
-Pedile SOLO los datos faltantes de forma breve.
-`;
-    } else if (data.hay_pedido && pedidoCompleto) {
-      instruccionesRespuesta = `
-El pedido está completo:
-${JSON.stringify(pedidoActual)}
-
-Agradecé el pedido y avisá que un vendedor confirmará disponibilidad y precio final.
-`;
-    } else {
-      instruccionesRespuesta = `
-Respondé normalmente como asistente del autoservicio.
-`;
+      return res.sendStatus(200);
     }
 
     const ai = await openai.responses.create({
@@ -347,7 +464,7 @@ Respondé normalmente como asistente del autoservicio.
       input: `
 Sos el asistente virtual de Autoservicio Victor.
 
-Información del negocio:
+Información:
 - Dirección: San Juan 573.
 - Horario: 8:00 a 22:00.
 - Realizamos envíos.
@@ -355,46 +472,17 @@ Información del negocio:
 - Horarios de entrega: 12:00 y 17:00.
 - Medios de pago: todos los medios en 1 cuota.
 
-Reglas:
-- Respondé breve, amable y en español argentino.
-- No confirmes stock.
-- No confirmes precio final.
-- Siempre decí que un vendedor confirmará disponibilidad y precio final.
-- Si faltan datos, pedí solo los datos faltantes.
-- No vuelvas a pedir productos si ya están en el pedido actual.
-- No vuelvas a pedir nombre, dirección, pago u horario si ya están en el pedido actual.
-
-${instruccionesRespuesta}
+Respondé breve, amable y en español argentino.
 
 Mensaje del cliente:
 ${text}
       `,
     });
 
-    const reply =
-      ai.output_text || "Gracias. Un vendedor te responderá en breve.";
-
-    await axios.post(
-      `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: "542994654375",
-        type: "text",
-        text: {
-          preview_url: false,
-          body: reply,
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
+    await enviarWhatsApp(
+      from,
+      ai.output_text || "Gracias. Un vendedor te responderá en breve."
     );
-
-    console.log("Respuesta enviada a WhatsApp");
 
     return res.sendStatus(200);
   } catch (error) {
