@@ -19,6 +19,9 @@ const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const mensajesProcesados = new Set();
 const pedidosEnCurso = {};
 
+let catalogoCache = [];
+let catalogoUltimaCarga = 0;
+
 function limpiarJson(texto) {
   if (!texto) return "{}";
   return texto.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -56,6 +59,43 @@ function calcularDatosFaltantes(pedido) {
   if (!pedido.horario_entrega) faltantes.push("horario_entrega");
 
   return faltantes;
+}
+
+async function obtenerCatalogo() {
+  const ahora = Date.now();
+
+  if (catalogoCache.length > 0 && ahora - catalogoUltimaCarga < 10 * 60 * 1000) {
+    return catalogoCache;
+  }
+
+  const auth = new google.auth.JWT(
+    GOOGLE_CLIENT_EMAIL,
+    null,
+    GOOGLE_PRIVATE_KEY,
+    ["https://www.googleapis.com/auth/spreadsheets"]
+  );
+
+  const sheets = google.sheets({ version: "v4", auth });
+
+  const result = await sheets.spreadsheets.values.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: "Catalogo!A2:B",
+  });
+
+  const rows = result.data.values || [];
+
+  catalogoCache = rows
+    .filter((row) => row[0] && row[1])
+    .map((row) => ({
+      codigo: String(row[0]).trim(),
+      articulo: String(row[1]).trim(),
+    }));
+
+  catalogoUltimaCarga = ahora;
+
+  console.log("Catálogo cargado:", catalogoCache.length, "productos");
+
+  return catalogoCache;
 }
 
 async function guardarPedido({
@@ -146,6 +186,12 @@ app.post("/webhook", async (req, res) => {
     const from = message.from;
     const text = message.text.body;
 
+    console.log("Mensaje recibido de:", from);
+    console.log("Texto recibido:", text);
+
+    const catalogo = await obtenerCatalogo();
+    console.log("Productos en catálogo:", catalogo.length);
+
     const pedidoAnterior = pedidosEnCurso[from] || {
       cliente: "",
       direccion: "",
@@ -154,8 +200,6 @@ app.post("/webhook", async (req, res) => {
       horario_entrega: "",
     };
 
-    console.log("Mensaje recibido de:", from);
-    console.log("Texto recibido:", text);
     console.log("Pedido anterior:", pedidoAnterior);
 
     const extractor = await openai.responses.create({
@@ -208,7 +252,7 @@ Devolvé este formato:
   "cliente": "",
   "direccion": "",
   "pago": "",
-  "productos": "2 Coca\n1 Pan\n1 Leche",
+  "productos": "2 Coca\\n1 Pan\\n1 Leche",
   "horario_entrega": ""
 }
 
