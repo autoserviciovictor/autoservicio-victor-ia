@@ -1,6 +1,4 @@
-from pathlib import Path
-
-code = r'''const express = require("express");
+const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
 const { google } = require("googleapis");
@@ -80,7 +78,6 @@ function combinarPedido(anterior, nuevo) {
   };
 }
 
-// BUSCADOR MEJORADO DE CATALOGO
 function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
   const q = normalizarTexto(busqueda);
 
@@ -95,33 +92,28 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
 
       let puntaje = 0;
 
-      // 1) Coincidencia exacta total
       if (art === q) {
         puntaje += 1000;
       }
 
-      // 2) El artículo empieza con la búsqueda completa
       if (art.startsWith(q)) {
         puntaje += 850;
       }
 
-      // 3) La búsqueda aparece como palabra exacta
       const regexBusquedaExacta = new RegExp(`\\b${q}\\b`, "i");
+
       if (regexBusquedaExacta.test(art)) {
         puntaje += 600;
       }
 
-      // 4) Contiene la frase completa
       if (art.includes(q)) {
         puntaje += 300;
       }
 
-      // 5) Priorizar si la primera palabra del artículo coincide
       if (palabrasArticulo[0] === q) {
         puntaje += 500;
       }
 
-      // 6) Coincidencias por cada palabra buscada
       for (const palabra of palabras) {
         const regexPalabra = new RegExp(`\\b${palabra}\\b`, "i");
 
@@ -136,7 +128,6 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         }
       }
 
-      // 7) Penalizar productos que no suelen ser lo que el cliente busca
       const penalizacionesGenerales = [
         "sin azucar",
         "cero azucar",
@@ -147,7 +138,7 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         "light",
         "diet",
         "sin sal",
-        "bajo sodio"
+        "bajo sodio",
       ];
 
       for (const penalizacion of penalizacionesGenerales) {
@@ -156,7 +147,6 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         }
       }
 
-      // 8) Caso especial: si el cliente busca AZUCAR, priorizar azúcar real
       if (q === "azucar") {
         if (art.startsWith("azucar")) {
           puntaje += 900;
@@ -174,14 +164,12 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         }
       }
 
-      // 9) Caso especial: si busca COCA, priorizar productos que empiezan con coca/coca cola
       if (q === "coca") {
         if (art.startsWith("coca") || art.startsWith("coca cola")) {
           puntaje += 700;
         }
       }
 
-      // 10) Caso especial: si busca MAYONESA, priorizar productos que empiezan con mayonesa
       if (q.includes("mayonesa")) {
         if (art.startsWith("mayonesa")) {
           puntaje += 700;
@@ -295,7 +283,11 @@ async function enviarWhatsApp(to, body) {
     {
       messaging_product: "whatsapp",
       recipient_type: "individual",
+
+      // NUMERO DE PRUEBA ACTUAL
+      // Cuando uses el número real, cambiá esta línea por: to: to,
       to: "542994654375",
+
       type: "text",
       text: {
         preview_url: false,
@@ -622,8 +614,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor activo en puerto ${PORT}`);
 });
-'''
-
-path = Path("/mnt/data/server_js_completo_con_logs_buscador.txt")
-path.write_text(code, encoding="utf-8")
-path
