@@ -40,7 +40,6 @@ function normalizarTexto(texto) {
 
 function normalizarHorario(horario) {
   if (!horario) return "";
-
   const h = String(horario).toLowerCase();
 
   if (h.includes("12") || h.includes("mediod")) return "12:00";
@@ -51,13 +50,11 @@ function normalizarHorario(horario) {
 
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
-
   if (!pedido.productos) faltantes.push("productos");
   if (!pedido.cliente) faltantes.push("nombre");
   if (!pedido.direccion) faltantes.push("direccion");
   if (!pedido.pago) faltantes.push("pago");
   if (!pedido.horario_entrega) faltantes.push("horario_entrega");
-
   return faltantes;
 }
 
@@ -80,7 +77,6 @@ function combinarPedido(anterior, nuevo) {
 
 function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
   const q = normalizarTexto(busqueda);
-
   if (!q || q.length < 2) return [];
 
   const palabras = q.split(" ").filter((p) => p.length > 1);
@@ -89,30 +85,16 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
     .map((item) => {
       const art = normalizarTexto(item.articulo);
       const palabrasArticulo = art.split(" ").filter(Boolean);
-
       let puntaje = 0;
 
-      if (art === q) {
-        puntaje += 1000;
-      }
-
-      if (art.startsWith(q)) {
-        puntaje += 850;
-      }
+      if (art === q) puntaje += 1000;
+      if (art.startsWith(q)) puntaje += 850;
 
       const regexBusquedaExacta = new RegExp(`\\b${q}\\b`, "i");
+      if (regexBusquedaExacta.test(art)) puntaje += 600;
 
-      if (regexBusquedaExacta.test(art)) {
-        puntaje += 600;
-      }
-
-      if (art.includes(q)) {
-        puntaje += 300;
-      }
-
-      if (palabrasArticulo[0] === q) {
-        puntaje += 500;
-      }
+      if (art.includes(q)) puntaje += 300;
+      if (palabrasArticulo[0] === q) puntaje += 500;
 
       for (const palabra of palabras) {
         const regexPalabra = new RegExp(`\\b${palabra}\\b`, "i");
@@ -130,6 +112,7 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
 
       const penalizacionesGenerales = [
         "sin azucar",
+        "s azucar",
         "cero azucar",
         "0 azucar",
         "zero azucar",
@@ -147,20 +130,42 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         }
       }
 
+      // CASO ESPECIAL AZUCAR:
+      // En tu catalogo está escrito como "Ledesma Azucar 1 Kg".
       if (q === "azucar") {
-        if (art.startsWith("azucar")) {
-          puntaje += 900;
-        } else {
-          puntaje -= 450;
+        if (art.includes("azucar 1 kg") || art.includes("azucar 1kg")) {
+          puntaje += 2500;
+        }
+
+        if (
+          art.includes("ledesma azucar") ||
+          art.includes("ledesma superior azucar") ||
+          art.includes("superior azucar")
+        ) {
+          puntaje += 2000;
+        }
+
+        if (art.includes("azucar comun") || art.includes("azucar blanca")) {
+          puntaje += 1800;
+        }
+
+        if (
+          art.includes("azucar light") ||
+          art.includes("rubio") ||
+          art.includes("mascabo") ||
+          art.includes("impalpable")
+        ) {
+          puntaje -= 300;
         }
 
         if (
           art.includes("sin azucar") ||
+          art.includes("s azucar") ||
           art.includes("cero azucar") ||
           art.includes("0 azucar") ||
           art.includes("zero")
         ) {
-          puntaje -= 1000;
+          puntaje -= 3000;
         }
       }
 
@@ -171,15 +176,11 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
       }
 
       if (q.includes("mayonesa")) {
-        if (art.startsWith("mayonesa")) {
-          puntaje += 700;
-        }
+        if (art.startsWith("mayonesa")) puntaje += 700;
+        if (art.includes("hellmanns") || art.includes("hellmann s")) puntaje += 900;
       }
 
-      return {
-        ...item,
-        puntaje,
-      };
+      return { ...item, puntaje };
     })
     .filter((item) => item.puntaje > 0)
     .sort((a, b) => b.puntaje - a.puntaje)
@@ -219,7 +220,6 @@ async function obtenerCatalogo() {
   catalogoUltimaCarga = ahora;
 
   console.log("Catálogo cargado:", catalogoCache.length, "productos");
-
   return catalogoCache;
 }
 
@@ -284,8 +284,8 @@ async function enviarWhatsApp(to, body) {
       messaging_product: "whatsapp",
       recipient_type: "individual",
 
-      // NUMERO DE PRUEBA ACTUAL
-      // Cuando uses el número real, cambiá esta línea por: to: to,
+      // NUMERO DE PRUEBA ACTUAL.
+      // Cuando pases al número real, reemplazá esta línea por: to: to,
       to: "542994654375",
 
       type: "text",
@@ -561,7 +561,6 @@ Reglas:
 
       if (productosBuscados.length > 0) {
         await procesarProductos(from, catalogo, pedidoActual, productosBuscados);
-
         return res.sendStatus(200);
       }
 
@@ -604,7 +603,6 @@ ${text}
     return res.sendStatus(200);
   } catch (error) {
     console.error("Error completo:", error.response?.data || error.message);
-
     return res.sendStatus(200);
   }
 });
