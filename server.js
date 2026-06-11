@@ -208,7 +208,7 @@ Devolvé este formato:
   "cliente": "",
   "direccion": "",
   "pago": "",
-  "productos": "",
+  "productos": "2 Coca\n1 Pan\n1 Leche",
   "horario_entrega": ""
 }
 
