@@ -77,22 +77,70 @@ function combinarPedido(anterior, nuevo) {
 
 function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
   const q = normalizarTexto(busqueda);
+
   if (!q || q.length < 2) return [];
 
-  const palabras = q.split(" ").filter((p) => p.length > 1);
+  const palabras = q.split(" ").filter(Boolean);
 
   return catalogo
     .map((item) => {
       const art = normalizarTexto(item.articulo);
+
       let puntaje = 0;
 
+      // Coincidencia exacta
+      if (art === q) puntaje += 1000;
+
+      // Prioriza artículos que empiezan con la búsqueda completa
+      if (art.startsWith(q)) puntaje += 800;
+
+      // Prioriza cuando aparece como palabra exacta
+      const regex = new RegExp(`\b${q}\b`, "i");
+      if (regex.test(art)) puntaje += 500;
+
+      // Contiene la frase completa
+      if (art.includes(q)) puntaje += 250;
+
+      // Coincidencias por cada palabra buscada
       for (const palabra of palabras) {
-        if (art.includes(palabra)) puntaje += 1;
+        if (art.includes(palabra)) {
+          puntaje += 50;
+        }
       }
 
-      if (art.includes(q)) puntaje += 3;
+      // Penaliza productos que NO deberían aparecer arriba
+      // cuando el cliente busca azúcar común.
+      const penalizaciones = [
+        "sin azucar",
+        "cero azucar",
+        "0 azucar",
+        "zero azucar",
+        "light",
+        "diet",
+        "sin sugar",
+        "sugar free"
+      ];
 
-      return { ...item, puntaje };
+      for (const penalizacion of penalizaciones) {
+        if (art.includes(penalizacion)) {
+          puntaje -= 600;
+        }
+      }
+
+      // Caso especial para azúcar:
+      // si el cliente busca "azucar", prioriza productos que arrancan con AZUCAR.
+      if (q === "azucar") {
+        if (art.startsWith("azucar")) {
+          puntaje += 500;
+        } else {
+          puntaje -= 300;
+        }
+      }
+
+      return {
+        ...item,
+        puntaje
+      };
     })
     .filter((item) => item.puntaje > 0)
     .sort((a, b) => b.puntaje - a.puntaje)
