@@ -181,6 +181,16 @@ Detectá como pedido si:
 - enumera productos aunque falten datos
 
 Reglas:
+- Formateá siempre los productos en múltiples líneas.
+- Si el cliente dice "coca x2", escribí "2 Coca".
+- Si el cliente dice "2 coca", escribí "2 Coca".
+- Si el cliente dice un producto sin cantidad, asumí cantidad 1.
+- No uses comas en productos.
+- Cada producto debe ir en una línea nueva.
+- Ejemplo: "coca x2, pan y leche" debe guardarse como:
+2 Coca
+1 Pan
+1 Leche
 - Si el mensaje nuevo solo trae nombre, dirección, pago y horario, pero el pedido anterior tenía productos, conservá los productos anteriores.
 - Si el mensaje nuevo trae productos nuevos, reemplazá productos por los nuevos.
 - Si dice "Agustín, San Juan 573, efectivo, 12hs", extraé:
