@@ -51,10 +51,10 @@ function normalizarHorario(horario) {
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
   if (!pedido.productos) faltantes.push("productos");
-  if (!pedido.cliente) faltantes.push("nombre");
-  if (!pedido.direccion) faltantes.push("direccion");
-  if (!pedido.pago) faltantes.push("pago");
-  if (!pedido.horario_entrega) faltantes.push("horario_entrega");
+  if (!pedido.cliente) faltantes.push("Nombre");
+  if (!pedido.direccion) faltantes.push("Dirección");
+  if (!pedido.pago) faltantes.push("Forma de pago");
+  if (!pedido.horario_entrega) faltantes.push("Horario de entrega (12:00 o 17:00)");
   return faltantes;
 }
 
