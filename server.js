@@ -127,14 +127,127 @@ function formatearProductos(productosBuscados) {
     .join("\n");
 }
 
+
+function obtenerPalabrasClave(producto) {
+  const ignorar = [
+    "de", "del", "la", "el", "los", "las", "en", "con", "sin", "y",
+    "x", "por", "un", "una", "1", "2", "3", "4", "5",
+    "kg", "gr", "lt", "l", "ml"
+  ];
+
+  return normalizarTexto(producto)
+    .split(" ")
+    .filter((p) => p.length > 2)
+    .filter((p) => !ignorar.includes(p));
+}
+
+function obtenerProductoPrincipal(producto) {
+  const palabras = obtenerPalabrasClave(producto);
+
+  const principales = [
+    "coca", "leche", "azucar", "yerba", "aceite", "arroz",
+    "fideo", "fideos", "harina", "mayonesa", "servilleta",
+    "servilletas", "agua", "gaseosa", "pan", "galletitas",
+    "jugo", "sal", "cafe", "te"
+  ];
+
+  for (const p of palabras) {
+    if (principales.includes(p)) return p;
+  }
+
+  return palabras[0] || "";
+}
+
+function parsearLineaProducto(linea) {
+  const texto = String(linea || "").trim();
+  const match = texto.match(/^(\\d+)\\s+(.+)$/);
+
+  if (match) {
+    return {
+      cantidad: Number(match[1]),
+      producto: match[2].trim(),
+    };
+  }
+
+  return {
+    cantidad: 1,
+    producto: texto,
+  };
+}
+
+function productosStringAItems(productos) {
+  if (!productos) return [];
+
+  return String(productos)
+    .split("\\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map(parsearLineaProducto);
+}
+
+function productosItemsAString(items) {
+  return items
+    .filter((i) => i && i.producto)
+    .map((i) => `${i.cantidad || 1} ${i.producto}`)
+    .join("\\n");
+}
+
+function productosBuscadosAItems(productosBuscados) {
+  if (!Array.isArray(productosBuscados)) return [];
+
+  return productosBuscados
+    .filter((p) => p && p.producto)
+    .map((p) => ({
+      cantidad: Number(p.cantidad || 1),
+      producto: String(p.producto || "").trim(),
+    }));
+}
+
+function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
+  const actuales = productosStringAItems(productosActuales);
+  const nuevos = productosBuscadosAItems(productosNuevos);
+
+  for (const nuevo of nuevos) {
+    const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
+    let indiceExistente = -1;
+
+    if (esAclaracion && principalNuevo) {
+      indiceExistente = actuales.findIndex((actual) => {
+        const principalActual = obtenerProductoPrincipal(actual.producto);
+        return principalActual && principalActual === principalNuevo;
+      });
+    }
+
+    if (indiceExistente >= 0) {
+      actuales[indiceExistente] = {
+        cantidad: actuales[indiceExistente].cantidad || nuevo.cantidad || 1,
+        producto: nuevo.producto,
+      };
+    } else {
+      actuales.push(nuevo);
+    }
+  }
+
+  return productosItemsAString(actuales);
+}
+
 function combinarPedido(anterior, nuevo) {
-  const productosNuevos = formatearProductos(nuevo.productos_buscados || []);
+  const productosNuevos = nuevo.productos_buscados || [];
+
+  const esAclaracion =
+    Array.isArray(anterior.dudas_productos) &&
+    anterior.dudas_productos.length > 0 &&
+    productosNuevos.length > 0;
 
   return {
     cliente: nuevo.cliente || anterior.cliente || "",
     direccion: nuevo.direccion || anterior.direccion || "",
     pago: normalizarPago(nuevo.pago) || anterior.pago || "",
-    productos: agregarProducto(anterior.productos || "", productosNuevos),
+    productos: fusionarProductos(
+      anterior.productos || "",
+      productosNuevos,
+      esAclaracion
+    ),
     horario_entrega: normalizarHorario(
       nuevo.horario_entrega || anterior.horario_entrega || ""
     ),
@@ -389,6 +502,9 @@ Reglas para datos:
 - Forma de pago válida solo puede ser: efectivo, tarjeta, transferencia o Mercado Pago.
 - Si el cliente escribe "agua", "coca", "leche" u otro producto, NO lo pongas como pago.
 - Si el cliente solo pasa nombre, dirección, pago u horario, productos_buscados debe ser [].
+- Si el pedido anterior tenía "3 leche" y el cliente aclara "leche entera en sachet", no lo tomes como producto nuevo; es una aclaración.
+- Si el pedido anterior tenía "1 coca" y el cliente aclara "coca 2l", no lo tomes como producto nuevo; es una aclaración.
+- En las aclaraciones, conservá la cantidad original del pedido anterior.
 - Si el cliente responde una aclaración de producto, actualizá el pedido anterior y dejá dudas_productos [] si ya quedó claro.
 - Si no hay pedido ni datos de pedido, hay_pedido false.
       `,
