@@ -324,8 +324,21 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
       }
 
       if (q.includes("mayonesa")) {
-        if (art.startsWith("mayonesa")) puntaje += 1600;
-        if (art.includes("hellmanns") || art.includes("hellmann s")) puntaje += 1600;
+        if (art.includes("mayonesa")) puntaje += 5000;
+        if (art.startsWith("mayonesa")) puntaje += 1800;
+
+        if (art.includes("hellmanns") || art.includes("hellmann s")) {
+          puntaje += 1500;
+        }
+
+        if (
+          art.includes("ketchup") ||
+          art.includes("barbacoa") ||
+          art.includes("salsa golf") ||
+          art.includes("mostaza")
+        ) {
+          puntaje -= 4000;
+        }
       }
 
       return {
@@ -604,28 +617,87 @@ app.post("/webhook", async (req, res) => {
       const opcion = parseInt(text, 10);
       const pendiente = seleccionesPendientes[from];
 
-      if (isNaN(opcion) || opcion < 1 || opcion > pendiente.opciones.length) {
+      // Si responde con un número válido, elige una opción.
+      if (!isNaN(opcion) && opcion >= 1 && opcion <= pendiente.opciones.length) {
+        const elegido = pendiente.opciones[opcion - 1];
+        const productoFinal = `${pendiente.cantidad} ${elegido.articulo}`;
+
+        let pedidoActual = {
+          ...pedidoAnterior,
+          productos: agregarProducto(pedidoAnterior.productos, productoFinal),
+        };
+
+        const productosPendientes = pendiente.productosPendientes || [];
+
+        delete seleccionesPendientes[from];
+
+        await procesarProductos(from, catalogo, pedidoActual, productosPendientes);
+
+        return res.sendStatus(200);
+      }
+
+      // Si NO responde con número, interpretamos el mensaje como una búsqueda más detallada.
+      // Ejemplo:
+      // Bot: opciones para "mayonesa hellmanns"
+      // Cliente: "hellmanns mayonesa doy pack"
+      // Entonces se vuelve a buscar con ese texto, sin obligar a elegir número.
+      const busquedaRefinada = text;
+      let nuevasOpciones = buscarEnCatalogo(catalogo, busquedaRefinada, 5);
+
+      // Si no encuentra nada, probamos combinando la búsqueda anterior con la nueva.
+      if (nuevasOpciones.length === 0) {
+        nuevasOpciones = buscarEnCatalogo(
+          catalogo,
+          `${pendiente.busqueda} ${busquedaRefinada}`,
+          5
+        );
+      }
+
+      if (nuevasOpciones.length === 0) {
         await enviarWhatsApp(
           from,
-          "Respondé con el número de una de las opciones."
+          `No encontré opciones para "${busquedaRefinada}". Probá escribiendo marca, producto y tamaño. Ejemplo: "mayonesa hellmanns 500gr".`
         );
 
         return res.sendStatus(200);
       }
 
-      const elegido = pendiente.opciones[opcion - 1];
-      const productoFinal = `${pendiente.cantidad} ${elegido.articulo}`;
+      // Si encuentra una sola opción, la agrega directamente.
+      if (nuevasOpciones.length === 1) {
+        const productoFinal = `${pendiente.cantidad} ${nuevasOpciones[0].articulo}`;
 
-      let pedidoActual = {
-        ...pedidoAnterior,
-        productos: agregarProducto(pedidoAnterior.productos, productoFinal),
+        let pedidoActual = {
+          ...pedidoAnterior,
+          productos: agregarProducto(pedidoAnterior.productos, productoFinal),
+        };
+
+        const productosPendientes = pendiente.productosPendientes || [];
+
+        delete seleccionesPendientes[from];
+
+        await procesarProductos(from, catalogo, pedidoActual, productosPendientes);
+
+        return res.sendStatus(200);
+      }
+
+      // Si encuentra varias, actualiza las opciones pendientes con la nueva búsqueda.
+      seleccionesPendientes[from] = {
+        cantidad: pendiente.cantidad,
+        busqueda: busquedaRefinada,
+        opciones: nuevasOpciones,
+        productosPendientes: pendiente.productosPendientes || [],
       };
 
-      const productosPendientes = pendiente.productosPendientes || [];
+      let mensaje = `Busqué mejor "${busquedaRefinada}" y encontré estas opciones:\n\n`;
 
-      delete seleccionesPendientes[from];
+      nuevasOpciones.forEach((op, i) => {
+        mensaje += `${i + 1}. ${op.articulo}\n`;
+      });
 
-      await procesarProductos(from, catalogo, pedidoActual, productosPendientes);
+      mensaje +=
+        "\nRespondé con el número de la opción correcta, o escribí más detalles si todavía no está lo que buscás.";
+
+      await enviarWhatsApp(from, mensaje);
 
       return res.sendStatus(200);
     }
