@@ -50,11 +50,11 @@ function normalizarHorario(horario) {
 
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
-  if (!pedido.productos) faltantes.push("Productos");
-  if (!pedido.cliente) faltantes.push("Nombre");
-  if (!pedido.direccion) faltantes.push("Dirección");
-  if (!pedido.pago) faltantes.push("Forma de pago");
-  if (!pedido.horario_entrega) faltantes.push("Horario de entrega (12:00 o 17:00)");
+  if (!pedido.productos) faltantes.push("productos");
+  if (!pedido.cliente) faltantes.push("nombre");
+  if (!pedido.direccion) faltantes.push("dirección");
+  if (!pedido.pago) faltantes.push("forma de pago");
+  if (!pedido.horario_entrega) faltantes.push("horario de entrega (12:00 o 17:00)");
   return faltantes;
 }
 
@@ -109,15 +109,19 @@ function distanciaLevenshtein(a, b) {
 function palabraCoincide(palabraBuscada, palabrasArticulo) {
   const p = normalizarTexto(palabraBuscada);
 
-  for (const palabraArt of palabrasArticulo) {
-    const a = normalizarTexto(palabraArt);
+  for (const palabraArticulo of palabrasArticulo) {
+    const a = normalizarTexto(palabraArticulo);
 
     if (a === p) return true;
-    if (a.includes(p) && p.length >= 4) return true;
-    if (p.includes(a) && a.length >= 4) return true;
 
-    // Tolerancia para errores chicos:
-    // ejemplo: hellman, helmans, hellmanns
+    // Permite plurales simples: coca/cocas, servilleta/servilletas.
+    if (a === p + "s" || p === a + "s") return true;
+
+    // Permite coincidencias parciales solo en palabras largas.
+    if (p.length >= 5 && a.includes(p)) return true;
+    if (a.length >= 5 && p.includes(a)) return true;
+
+    // Permite errores pequeños: hellman/hellmanns, descremada/descrem.
     if (p.length >= 5 && a.length >= 5) {
       const distancia = distanciaLevenshtein(p, a);
       if (distancia <= 2) return true;
@@ -185,15 +189,25 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
     "necesito",
     "busco",
     "comprar",
+    "llevo",
+    "pasame",
     "un",
     "una",
     "uno",
+    "unos",
+    "unas",
     "dos",
     "tres",
     "cuatro",
     "cinco",
+    "seis",
+    "siete",
+    "ocho",
+    "nueve",
+    "diez",
     "de",
     "del",
+    "en",
     "la",
     "el",
     "los",
@@ -228,6 +242,8 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
     "fanta",
     "agua",
     "jugo",
+    "servilleta",
+    "servilletas",
     "galletitas",
     "galletita",
     "pan",
@@ -247,48 +263,55 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
     "papel",
   ];
 
-  return catalogo
+  const resultados = catalogo
     .map((item) => {
       const art = normalizarTexto(item.articulo);
       const palabrasArticulo = art.split(" ").filter(Boolean);
 
       let puntaje = 0;
+      let coincidencias = 0;
 
-      const coincidencias = palabrasBuscadas.filter((p) =>
-        palabraCoincide(p, palabrasArticulo)
-      );
+      const detalleCoincidencias = palabrasBuscadas.map((palabra) => ({
+        palabra,
+        coincide: palabraCoincide(palabra, palabrasArticulo),
+      }));
 
-      const faltantes = palabrasBuscadas.filter(
-        (p) => !palabraCoincide(p, palabrasArticulo)
-      );
+      coincidencias = detalleCoincidencias.filter((d) => d.coincide).length;
+      const faltantes = detalleCoincidencias.filter((d) => !d.coincide).length;
 
-      const todasLasPalabrasCoinciden = faltantes.length === 0;
-
-      // Regla general más importante:
-      // Si el cliente escribe varias palabras, priorizamos que estén todas.
-      // Ejemplo: "mayonesa hellmanns" NO debe traer "Natura Mayonesa".
-      if (palabrasBuscadas.length >= 2 && !todasLasPalabrasCoinciden) {
-        puntaje -= 5000 * faltantes.length;
+      // Si no coincide ninguna palabra, no sirve.
+      if (coincidencias === 0) {
+        return {
+          ...item,
+          puntaje: -9999,
+          coincidencias,
+        };
       }
 
-      // Coincidencia exacta de la frase.
+      // Base principal: cantidad de palabras coincidentes.
+      puntaje += coincidencias * 3000;
+
+      // Si coinciden todas las palabras, prioridad fuerte.
+      if (faltantes === 0) {
+        puntaje += 8000;
+      }
+
+      // Si faltan palabras en búsquedas detalladas, penaliza fuerte.
+      // Ejemplo: "mayonesa hellmanns" no debe mostrar "Natura Mayonesa".
+      if (palabrasBuscadas.length >= 2 && faltantes > 0) {
+        puntaje -= faltantes * 5000;
+      }
+
+      // Coincidencia de frase completa.
       if (art === q) puntaje += 10000;
-      if (art.includes(q)) puntaje += 6000;
+      if (art.includes(q)) puntaje += 7000;
       if (art.startsWith(q)) puntaje += 5000;
 
-      // Puntos por cada palabra encontrada.
-      puntaje += coincidencias.length * 1500;
-
-      // Bonus fuerte si aparecen todas las palabras pedidas.
-      if (todasLasPalabrasCoinciden) {
-        puntaje += 6000;
-      }
-
-      // Bonus por orden: producto y marca cerca.
-      let posiciones = [];
+      // Bonus por posición: mejor si las palabras aparecen al principio.
+      const posiciones = [];
 
       for (const palabra of palabrasBuscadas) {
-        let pos = palabrasArticulo.findIndex((pa) =>
+        const pos = palabrasArticulo.findIndex((pa) =>
           palabraCoincide(palabra, [pa])
         );
 
@@ -298,9 +321,9 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
       if (posiciones.length > 0) {
         const primeraPos = Math.min(...posiciones);
 
-        if (primeraPos === 0) puntaje += 2000;
-        else if (primeraPos === 1) puntaje += 1500;
-        else if (primeraPos === 2) puntaje += 800;
+        if (primeraPos === 0) puntaje += 2200;
+        else if (primeraPos === 1) puntaje += 1700;
+        else if (primeraPos === 2) puntaje += 900;
         else puntaje += 200;
       }
 
@@ -311,50 +334,71 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         productosPrincipales.includes(palabrasBuscadas[0])
       ) {
         const producto = palabrasBuscadas[0];
-        const posProducto = palabrasArticulo.indexOf(producto);
+        const posProducto = palabrasArticulo.findIndex((pa) =>
+          palabraCoincide(producto, [pa])
+        );
 
         if (posProducto === 0) puntaje += 2500;
         else if (posProducto === 1) puntaje += 2000;
         else if (posProducto === 2) puntaje += 900;
-        else if (posProducto >= 3) puntaje -= 900;
+        else if (posProducto >= 3) puntaje -= 1000;
 
         if (tieneVersionEspecial(art, producto)) {
           puntaje = -9999;
         }
       }
 
-      // Penalizaciones generales.
+      // Penalización general para "sin/cero/light" cuando afecta al producto buscado.
       for (const palabra of palabrasBuscadas) {
         if (tieneVersionEspecial(art, palabra)) {
-          puntaje -= 5000;
+          puntaje -= 6000;
         }
       }
 
-      // Tamaños comunes: pequeño bonus.
+      // Bonus por presentaciones comunes.
       if (
         art.includes("1 kg") ||
         art.includes("1kg") ||
         art.includes("1 lt") ||
         art.includes("1lt") ||
+        art.includes("2 l") ||
+        art.includes("2l") ||
         art.includes("500 gr") ||
-        art.includes("500gr")
+        art.includes("500gr") ||
+        art.includes("sachet")
       ) {
         puntaje += 200;
       }
 
-      // Si el producto tiene muchas palabras extra y no todas fueron pedidas,
-      // bajarlo un poco para evitar resultados raros.
-      if (palabrasArticulo.length > 6 && palabrasBuscadas.length <= 2) {
-        puntaje -= 200;
+      // Penaliza artículos demasiado largos cuando la búsqueda es corta.
+      if (palabrasArticulo.length > 7 && palabrasBuscadas.length <= 2) {
+        puntaje -= 250;
       }
 
       return {
         ...item,
         puntaje,
+        coincidencias,
       };
     })
-    .filter((item) => item.puntaje > 0)
-    .sort((a, b) => b.puntaje - a.puntaje)
+    .filter((item) => item.puntaje > 0);
+
+  if (resultados.length === 0) return [];
+
+  const maxCoincidencias = Math.max(...resultados.map((r) => r.coincidencias));
+
+  // Filtro clave:
+  // Si las mejores opciones tienen 3 coincidencias, no mostrar productos con 1.
+  // Esto evita que aparezcan vinagre/ketchup cuando se buscan servilletas o leche.
+  return resultados
+    .filter((item) => item.coincidencias >= Math.max(1, maxCoincidencias - 1))
+    .sort((a, b) => {
+      if (b.coincidencias !== a.coincidencias) {
+        return b.coincidencias - a.coincidencias;
+      }
+
+      return b.puntaje - a.puntaje;
+    })
     .slice(0, limite);
 }
 
@@ -762,6 +806,7 @@ Reglas:
 - Si el cliente dice algo como "agustin, san juan 456, tarjeta y 12", interpretá 12 como horario_entrega "12:00", NO como cantidad de producto.
 - Nunca inventes un producto llamado "producto".
 - Nunca agregues productos_buscados si el cliente solo está pasando nombre, dirección, forma de pago u horario.
+- Si el cliente escribe datos personales después de elegir productos, productos_buscados debe ser [].
 - No preguntes por monto mínimo.
 - No confirmes stock.
 - No confirmes precio final.
