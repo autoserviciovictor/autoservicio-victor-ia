@@ -75,13 +75,142 @@ function combinarPedido(anterior, nuevo) {
   };
 }
 
+function distanciaLevenshtein(a, b) {
+  a = String(a || "");
+  b = String(b || "");
+
+  const matriz = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matriz[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matriz[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matriz[i][j] = matriz[i - 1][j - 1];
+      } else {
+        matriz[i][j] = Math.min(
+          matriz[i - 1][j - 1] + 1,
+          matriz[i][j - 1] + 1,
+          matriz[i - 1][j] + 1
+        );
+      }
+    }
+  }
+
+  return matriz[b.length][a.length];
+}
+
+function palabraCoincide(palabraBuscada, palabrasArticulo) {
+  const p = normalizarTexto(palabraBuscada);
+
+  for (const palabraArt of palabrasArticulo) {
+    const a = normalizarTexto(palabraArt);
+
+    if (a === p) return true;
+    if (a.includes(p) && p.length >= 4) return true;
+    if (p.includes(a) && a.length >= 4) return true;
+
+    // Tolerancia para errores chicos:
+    // ejemplo: hellman, helmans, hellmanns
+    if (p.length >= 5 && a.length >= 5) {
+      const distancia = distanciaLevenshtein(p, a);
+      if (distancia <= 2) return true;
+    }
+  }
+
+  return false;
+}
+
+function tieneVersionEspecial(art, productoBuscado) {
+  const palabrasArt = art.split(" ").filter(Boolean);
+
+  const indicadores = [
+    "sin",
+    "s",
+    "cero",
+    "zero",
+    "0",
+    "light",
+    "diet",
+    "bajo",
+    "baja",
+    "libre",
+    "reducido",
+    "reducida",
+  ];
+
+  const especiales = [
+    "azucar",
+    "sal",
+    "sodio",
+    "gluten",
+    "lactosa",
+    "alcohol",
+    "grasas",
+    "grasa",
+  ];
+
+  for (let i = 0; i < palabrasArt.length; i++) {
+    const actual = palabrasArt[i];
+    const siguiente = palabrasArt[i + 1] || "";
+    const siguiente2 = palabrasArt[i + 2] || "";
+
+    if (
+      indicadores.includes(actual) &&
+      (siguiente === productoBuscado ||
+        siguiente2 === productoBuscado ||
+        especiales.includes(siguiente) ||
+        especiales.includes(siguiente2))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
   const q = normalizarTexto(busqueda);
   if (!q || q.length < 2) return [];
 
-  const palabrasBuscadas = q.split(" ").filter((p) => p.length > 1);
+  const palabrasIgnorar = [
+    "quiero",
+    "dame",
+    "necesito",
+    "busco",
+    "comprar",
+    "un",
+    "una",
+    "uno",
+    "dos",
+    "tres",
+    "cuatro",
+    "cinco",
+    "de",
+    "del",
+    "la",
+    "el",
+    "los",
+    "las",
+    "y",
+    "por",
+    "favor",
+  ];
 
-  const palabrasDeProductoPrincipal = [
+  const palabrasBuscadas = q
+    .split(" ")
+    .filter((p) => p.length > 1)
+    .filter((p) => !palabrasIgnorar.includes(p));
+
+  if (palabrasBuscadas.length === 0) return [];
+
+  const productosPrincipales = [
     "azucar",
     "sal",
     "leche",
@@ -118,66 +247,6 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
     "papel",
   ];
 
-  const palabrasQueIndicanVersion = [
-    "sin",
-    "s",
-    "cero",
-    "zero",
-    "0",
-    "light",
-    "diet",
-    "bajo",
-    "baja",
-    "libre",
-    "reducido",
-    "reducida",
-  ];
-
-  const palabrasEspeciales = [
-    "azucar",
-    "sal",
-    "sodio",
-    "gluten",
-    "lactosa",
-    "alcohol",
-    "grasas",
-    "grasa",
-  ];
-
-  function tieneVersionEspecial(art, productoBuscado) {
-    const palabrasArt = art.split(" ").filter(Boolean);
-
-    for (let i = 0; i < palabrasArt.length; i++) {
-      const actual = palabrasArt[i];
-      const siguiente = palabrasArt[i + 1] || "";
-      const siguiente2 = palabrasArt[i + 2] || "";
-
-      if (
-        palabrasQueIndicanVersion.includes(actual) &&
-        (siguiente === productoBuscado ||
-          siguiente2 === productoBuscado ||
-          palabrasEspeciales.includes(siguiente) ||
-          palabrasEspeciales.includes(siguiente2))
-      ) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  function posicionPrimeraCoincidencia(art, palabras) {
-    const palabrasArt = art.split(" ").filter(Boolean);
-    let mejor = 999;
-
-    for (const palabra of palabras) {
-      const pos = palabrasArt.indexOf(palabra);
-      if (pos !== -1 && pos < mejor) mejor = pos;
-    }
-
-    return mejor;
-  }
-
   return catalogo
     .map((item) => {
       const art = normalizarTexto(item.articulo);
@@ -185,79 +254,83 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
 
       let puntaje = 0;
 
-      // Coincidencia exacta total.
-      if (art === q) puntaje += 3000;
+      const coincidencias = palabrasBuscadas.filter((p) =>
+        palabraCoincide(p, palabrasArticulo)
+      );
 
-      // El artículo empieza con la búsqueda.
-      if (art.startsWith(q)) puntaje += 2200;
+      const faltantes = palabrasBuscadas.filter(
+        (p) => !palabraCoincide(p, palabrasArticulo)
+      );
 
-      // La búsqueda aparece completa.
-      if (art.includes(q)) puntaje += 900;
+      const todasLasPalabrasCoinciden = faltantes.length === 0;
 
-      // Coincidencia exacta por palabras.
+      // Regla general más importante:
+      // Si el cliente escribe varias palabras, priorizamos que estén todas.
+      // Ejemplo: "mayonesa hellmanns" NO debe traer "Natura Mayonesa".
+      if (palabrasBuscadas.length >= 2 && !todasLasPalabrasCoinciden) {
+        puntaje -= 5000 * faltantes.length;
+      }
+
+      // Coincidencia exacta de la frase.
+      if (art === q) puntaje += 10000;
+      if (art.includes(q)) puntaje += 6000;
+      if (art.startsWith(q)) puntaje += 5000;
+
+      // Puntos por cada palabra encontrada.
+      puntaje += coincidencias.length * 1500;
+
+      // Bonus fuerte si aparecen todas las palabras pedidas.
+      if (todasLasPalabrasCoinciden) {
+        puntaje += 6000;
+      }
+
+      // Bonus por orden: producto y marca cerca.
+      let posiciones = [];
+
       for (const palabra of palabrasBuscadas) {
-        const regexPalabra = new RegExp(`\\b${palabra}\\b`, "i");
+        let pos = palabrasArticulo.findIndex((pa) =>
+          palabraCoincide(palabra, [pa])
+        );
 
-        if (regexPalabra.test(art)) {
-          puntaje += 500;
-        } else if (art.includes(palabra)) {
-          puntaje += 150;
-        }
+        if (pos !== -1) posiciones.push(pos);
       }
 
-      // Si todas las palabras buscadas aparecen, sube.
-      const todasAparecen = palabrasBuscadas.every((p) => art.includes(p));
-      if (todasAparecen) puntaje += 600;
+      if (posiciones.length > 0) {
+        const primeraPos = Math.min(...posiciones);
 
-      // Priorizar cuando la coincidencia aparece cerca del inicio.
-      const pos = posicionPrimeraCoincidencia(art, palabrasBuscadas);
-      if (pos === 0) puntaje += 1200;
-      else if (pos === 1) puntaje += 900;
-      else if (pos === 2) puntaje += 500;
-      else if (pos >= 3 && pos < 999) puntaje += 100;
-
-      // Si se busca marca + producto, priorizar que aparezcan ambas.
-      if (palabrasBuscadas.length >= 2 && todasAparecen) {
-        puntaje += 900;
+        if (primeraPos === 0) puntaje += 2000;
+        else if (primeraPos === 1) puntaje += 1500;
+        else if (primeraPos === 2) puntaje += 800;
+        else puntaje += 200;
       }
 
-      // Penalización general para versiones "sin", "cero", "light", etc.
-      // Ejemplo: buscar "azucar" no debe priorizar "Monster s/azucar".
-      for (const palabra of palabrasBuscadas) {
-        if (tieneVersionEspecial(art, palabra)) {
-          puntaje -= 4000;
-        }
-      }
-
-      // Si el usuario busca un producto principal simple, evitar que aparezca como característica secundaria.
-      // Ejemplo: "azucar" en "cereal s/azucar", "sal" en "sin sal".
+      // Si es una búsqueda simple de producto principal,
+      // evitar que aparezca como característica secundaria.
       if (
         palabrasBuscadas.length === 1 &&
-        palabrasDeProductoPrincipal.includes(q)
+        productosPrincipales.includes(palabrasBuscadas[0])
       ) {
-        const posProducto = palabrasArticulo.indexOf(q);
+        const producto = palabrasBuscadas[0];
+        const posProducto = palabrasArticulo.indexOf(producto);
 
-        if (posProducto === 0) puntaje += 1800;
-        else if (posProducto === 1) puntaje += 1400;
-        else if (posProducto === 2) puntaje += 700;
-        else if (posProducto >= 3) puntaje -= 700;
+        if (posProducto === 0) puntaje += 2500;
+        else if (posProducto === 1) puntaje += 2000;
+        else if (posProducto === 2) puntaje += 900;
+        else if (posProducto >= 3) puntaje -= 900;
 
-        if (tieneVersionEspecial(art, q)) {
+        if (tieneVersionEspecial(art, producto)) {
           puntaje = -9999;
         }
       }
 
-      // Caso general para productos comunes con marca delante:
-      // "Ledesma Azucar 1 Kg", "Natura Aceite...", "Amanda Yerba..."
-      if (
-        palabrasBuscadas.length === 1 &&
-        palabrasDeProductoPrincipal.includes(q) &&
-        palabrasArticulo.includes(q)
-      ) {
-        puntaje += 1200;
+      // Penalizaciones generales.
+      for (const palabra of palabrasBuscadas) {
+        if (tieneVersionEspecial(art, palabra)) {
+          puntaje -= 5000;
+        }
       }
 
-      // Ajustes suaves por tamaño común.
+      // Tamaños comunes: pequeño bonus.
       if (
         art.includes("1 kg") ||
         art.includes("1kg") ||
@@ -266,79 +339,13 @@ function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
         art.includes("500 gr") ||
         art.includes("500gr")
       ) {
-        puntaje += 150;
+        puntaje += 200;
       }
 
-      // Ajustes específicos pero no únicos.
-      if (q === "azucar") {
-        if (art.includes("azucar 1 kg") || art.includes("azucar 1kg")) {
-          puntaje += 2500;
-        }
-
-        if (
-          art.includes("ledesma azucar") ||
-          art.includes("ledesma superior azucar") ||
-          art.includes("superior azucar")
-        ) {
-          puntaje += 2500;
-        }
-
-        if (
-          art.includes("impalpable") ||
-          art.includes("light") ||
-          art.includes("rubio") ||
-          art.includes("mascabo")
-        ) {
-          puntaje -= 300;
-        }
-      }
-
-      if (q === "sal") {
-        if (art.includes("sal fina") || art.includes("sal gruesa")) {
-          puntaje += 1800;
-        }
-
-        if (tieneVersionEspecial(art, "sal") || art.includes("sin sal")) {
-          puntaje = -9999;
-        }
-      }
-
-      if (q === "leche") {
-        if (art.startsWith("leche") || palabrasArticulo[0] === "leche") {
-          puntaje += 1800;
-        }
-
-        if (art.includes("dulce de leche")) {
-          puntaje -= 2500;
-        }
-      }
-
-      if (q === "coca") {
-        if (
-          art.startsWith("coca") ||
-          art.startsWith("coca cola") ||
-          art.includes("coca cola")
-        ) {
-          puntaje += 2500;
-        }
-      }
-
-      if (q.includes("mayonesa")) {
-        if (art.includes("mayonesa")) puntaje += 5000;
-        if (art.startsWith("mayonesa")) puntaje += 1800;
-
-        if (art.includes("hellmanns") || art.includes("hellmann s")) {
-          puntaje += 1500;
-        }
-
-        if (
-          art.includes("ketchup") ||
-          art.includes("barbacoa") ||
-          art.includes("salsa golf") ||
-          art.includes("mostaza")
-        ) {
-          puntaje -= 4000;
-        }
+      // Si el producto tiene muchas palabras extra y no todas fueron pedidas,
+      // bajarlo un poco para evitar resultados raros.
+      if (palabrasArticulo.length > 6 && palabrasBuscadas.length <= 2) {
+        puntaje -= 200;
       }
 
       return {
