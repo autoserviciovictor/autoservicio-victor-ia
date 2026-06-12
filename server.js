@@ -40,12 +40,51 @@ function normalizarTexto(texto) {
 
 function normalizarHorario(horario) {
   if (!horario) return "";
-  const h = String(horario).toLowerCase();
 
-  if (h.includes("12") || h.includes("mediod")) return "12:00";
-  if (h.includes("17") || h.includes("5") || h.includes("tarde")) return "17:00";
+  const h = normalizarTexto(horario);
 
-  return horario;
+  // Horarios válidos del negocio.
+  if (
+    h === "12" ||
+    h === "12 00" ||
+    h === "12hs" ||
+    h === "12 hs" ||
+    h.includes("mediod")
+  ) {
+    return "12:00";
+  }
+
+  if (
+    h === "17" ||
+    h === "17 00" ||
+    h === "17hs" ||
+    h === "17 hs" ||
+    h === "5 tarde" ||
+    h.includes("tarde")
+  ) {
+    return "17:00";
+  }
+
+  // No aceptamos horarios fuera de 12:00 o 17:00.
+  return "";
+}
+
+function normalizarPago(pago) {
+  const p = normalizarTexto(pago);
+
+  if (!p) return "";
+
+  if (p.includes("efectivo")) return "efectivo";
+  if (p.includes("tarjeta") || p.includes("debito") || p.includes("credito")) {
+    return "tarjeta";
+  }
+  if (p.includes("transferencia") || p.includes("transf")) return "transferencia";
+  if (p.includes("mercado pago") || p.includes("mercadopago") || p === "mp") {
+    return "Mercado Pago";
+  }
+
+  // Si dice una palabra que no es forma de pago, no la guardamos como pago.
+  return "";
 }
 
 function calcularDatosFaltantes(pedido) {
@@ -67,7 +106,7 @@ function combinarPedido(anterior, nuevo) {
   return {
     cliente: nuevo.cliente || anterior.cliente || "",
     direccion: nuevo.direccion || anterior.direccion || "",
-    pago: nuevo.pago || anterior.pago || "",
+    pago: normalizarPago(nuevo.pago) || anterior.pago || "",
     productos: anterior.productos || "",
     horario_entrega: normalizarHorario(
       nuevo.horario_entrega || anterior.horario_entrega || ""
@@ -106,25 +145,45 @@ function distanciaLevenshtein(a, b) {
   return matriz[b.length][a.length];
 }
 
+function obtenerAliasesPalabra(palabra) {
+  const p = normalizarTexto(palabra);
+
+  const aliases = {
+    "sachet": ["sachet", "sache", "sach"],
+    "sache": ["sachet", "sache", "sach"],
+    "descremada": ["descremada", "desc", "descrem"],
+    "descrem": ["descremada", "desc", "descrem"],
+    "coca": ["coca", "cola"],
+    "servilletas": ["servilletas", "servilleta"],
+    "servilleta": ["servilletas", "servilleta"],
+  };
+
+  return aliases[p] || [p];
+}
+
 function palabraCoincide(palabraBuscada, palabrasArticulo) {
-  const p = normalizarTexto(palabraBuscada);
+  const aliasesBuscadas = obtenerAliasesPalabra(palabraBuscada);
 
-  for (const palabraArticulo of palabrasArticulo) {
-    const a = normalizarTexto(palabraArticulo);
+  for (const alias of aliasesBuscadas) {
+    const p = normalizarTexto(alias);
 
-    if (a === p) return true;
+    for (const palabraArticulo of palabrasArticulo) {
+      const a = normalizarTexto(palabraArticulo);
+      const aliasesArticulo = obtenerAliasesPalabra(a);
 
-    // Permite plurales simples: coca/cocas, servilleta/servilletas.
-    if (a === p + "s" || p === a + "s") return true;
+      for (const aliasArticulo of aliasesArticulo) {
+        const aa = normalizarTexto(aliasArticulo);
 
-    // Permite coincidencias parciales solo en palabras largas.
-    if (p.length >= 5 && a.includes(p)) return true;
-    if (a.length >= 5 && p.includes(a)) return true;
+        if (aa === p) return true;
+        if (aa === p + "s" || p === aa + "s") return true;
+        if (p.length >= 5 && aa.includes(p)) return true;
+        if (aa.length >= 5 && p.includes(aa)) return true;
 
-    // Permite errores pequeños: hellman/hellmanns, descremada/descrem.
-    if (p.length >= 5 && a.length >= 5) {
-      const distancia = distanciaLevenshtein(p, a);
-      if (distancia <= 2) return true;
+        if (p.length >= 5 && aa.length >= 5) {
+          const distancia = distanciaLevenshtein(p, aa);
+          if (distancia <= 2) return true;
+        }
+      }
     }
   }
 
@@ -565,12 +624,21 @@ async function procesarProductos(from, catalogo, pedidoActual, productosPendient
     if (opciones.length === 0) {
       console.log("Sin coincidencias para:", busqueda);
 
-      pedidoActual.productos = agregarProducto(
-        pedidoActual.productos,
-        `${cantidad} ${busqueda}`
+      pedidosEnCurso[from] = pedidoActual;
+
+      seleccionesPendientes[from] = {
+        cantidad,
+        busqueda,
+        opciones: [],
+        productosPendientes,
+      };
+
+      await enviarWhatsApp(
+        from,
+        `No encontré "${busqueda}" en el catálogo. Escribime más detalles, por ejemplo marca, tamaño o presentación.`
       );
 
-      continue;
+      return false;
     }
 
     opciones.forEach((op, i) => {
@@ -802,8 +870,13 @@ Reglas:
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
 - MUY IMPORTANTE: si el mensaje parece completar datos personales y NO menciona productos nuevos, productos_buscados debe ser [].
 - Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
-- Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
+- Si dice 17hs, 17, 5 de la tarde, tarde: horario_entrega = "17:00".
+- Si dice 11, 13, 15, 16, 17.30, 18 u otro horario distinto, dejá horario_entrega = "".
+- El negocio solo acepta entregas a las 12:00 o 17:00.
 - Si el cliente dice algo como "agustin, san juan 456, tarjeta y 12", interpretá 12 como horario_entrega "12:00", NO como cantidad de producto.
+- Si el cliente dice solo "12" o solo "17" y hay un pedido pendiente, interpretalo como horario_entrega.
+- Forma de pago válida solo puede ser: efectivo, tarjeta, transferencia o Mercado Pago.
+- Si el cliente escribe "agua", "gaseosa", "coca" u otro producto, NO lo pongas como pago.
 - Nunca inventes un producto llamado "producto".
 - Nunca agregues productos_buscados si el cliente solo está pasando nombre, dirección, forma de pago u horario.
 - Si el cliente escribe datos personales después de elegir productos, productos_buscados debe ser [].
@@ -833,15 +906,22 @@ Reglas:
 
     console.log("Datos extraídos:", data);
 
-    if (data.hay_pedido) {
+    const productosBuscados = data.productos_buscados || [];
+    const tieneDatosPedido =
+      data.hay_pedido ||
+      productosBuscados.length > 0 ||
+      data.cliente ||
+      data.direccion ||
+      data.pago ||
+      data.horario_entrega;
+
+    if (tieneDatosPedido) {
       let pedidoActual = combinarPedido(pedidoAnterior, {
         cliente: data.cliente,
         direccion: data.direccion,
         pago: data.pago,
         horario_entrega: data.horario_entrega,
       });
-
-      const productosBuscados = data.productos_buscados || [];
 
       if (productosBuscados.length > 0) {
         await procesarProductos(from, catalogo, pedidoActual, productosBuscados);
