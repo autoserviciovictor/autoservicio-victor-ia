@@ -50,7 +50,7 @@ function normalizarHorario(horario) {
 
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
-  if (!pedido.productos) faltantes.push("productos");
+  if (!pedido.productos) faltantes.push("Productos");
   if (!pedido.cliente) faltantes.push("Nombre");
   if (!pedido.direccion) faltantes.push("Dirección");
   if (!pedido.pago) faltantes.push("Forma de pago");
