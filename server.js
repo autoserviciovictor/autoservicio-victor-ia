@@ -223,28 +223,60 @@ function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
   const actuales = productosStringAItems(productosActuales);
   const nuevos = productosBuscadosAItems(productosNuevos);
 
-  for (const nuevo of nuevos) {
-    const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
-    let indiceExistente = -1;
+  if (!esAclaracion) {
+    return productosItemsAString([...actuales, ...nuevos]);
+  }
 
-    if (esAclaracion && principalNuevo) {
-      indiceExistente = actuales.findIndex((actual) => {
-        const principalActual = obtenerProductoPrincipal(actual.producto);
-        return principalActual && principalActual === principalNuevo;
+  // En aclaraciones, reemplazamos productos ambiguos existentes.
+  // Caso simple:
+  //   2 coca -> coca 2l  => 2 coca 2l
+  // Caso dividido:
+  //   3 leche -> 2 leche entera + 1 leche descremada
+  //   => 2 leche entera + 1 leche descremada
+  const usados = new Set();
+  const resultado = [];
+
+  for (const actual of actuales) {
+    const principalActual = obtenerProductoPrincipal(actual.producto);
+
+    const relacionados = nuevos
+      .map((nuevo, index) => ({ nuevo, index }))
+      .filter(({ nuevo }) => {
+        const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
+        return principalActual && principalNuevo && principalActual === principalNuevo;
       });
+
+    if (relacionados.length === 0) {
+      resultado.push(actual);
+      continue;
     }
 
-    if (indiceExistente >= 0) {
-      actuales[indiceExistente] = {
-        cantidad: actuales[indiceExistente].cantidad || nuevo.cantidad || 1,
+    relacionados.forEach(({ index }) => usados.add(index));
+
+    if (relacionados.length === 1) {
+      const nuevo = relacionados[0].nuevo;
+
+      resultado.push({
+        cantidad: actual.cantidad || nuevo.cantidad || 1,
         producto: nuevo.producto,
-      };
+      });
     } else {
-      actuales.push(nuevo);
+      for (const { nuevo } of relacionados) {
+        resultado.push({
+          cantidad: nuevo.cantidad || 1,
+          producto: nuevo.producto,
+        });
+      }
     }
   }
 
-  return productosItemsAString(actuales);
+  nuevos.forEach((nuevo, index) => {
+    if (!usados.has(index)) {
+      resultado.push(nuevo);
+    }
+  });
+
+  return productosItemsAString(resultado);
 }
 
 function combinarPedido(anterior, nuevo) {
@@ -520,7 +552,8 @@ Reglas para datos:
 - Si el cliente solo pasa nombre, dirección, pago u horario, productos_buscados debe ser [].
 - Si el pedido anterior tenía "3 leche" y el cliente aclara "leche entera en sachet", no lo tomes como producto nuevo; es una aclaración.
 - Si el pedido anterior tenía "1 coca" y el cliente aclara "coca 2l", no lo tomes como producto nuevo; es una aclaración.
-- En las aclaraciones, conservá la cantidad original del pedido anterior.
+- En las aclaraciones simples, conservá la cantidad original del pedido anterior.
+- Si el cliente divide un producto anterior en varias variantes, respetá las cantidades nuevas de cada variante. Ejemplo: si antes tenía 3 leche y ahora aclara 2 leche entera en sachet y 1 leche descremada en botella, devolvé esos dos productos separados.
 - Si el cliente responde una aclaración de producto, actualizá el pedido anterior y dejá dudas_productos [] si ya quedó claro.
 - Si no hay pedido ni datos de pedido, hay_pedido false.
       `,
