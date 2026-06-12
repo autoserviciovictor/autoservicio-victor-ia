@@ -18,10 +18,6 @@ const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 const mensajesProcesados = new Set();
 const pedidosEnCurso = {};
-const seleccionesPendientes = {};
-
-let catalogoCache = [];
-let catalogoUltimaCarga = 0;
 
 function limpiarJson(texto) {
   if (!texto) return "{}";
@@ -33,7 +29,7 @@ function normalizarTexto(texto) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9\s:.]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -43,12 +39,12 @@ function normalizarHorario(horario) {
 
   const h = normalizarTexto(horario);
 
-  // Horarios válidos del negocio.
   if (
     h === "12" ||
+    h === "12:00" ||
     h === "12 00" ||
-    h === "12hs" ||
-    h === "12 hs" ||
+    h.includes("12hs") ||
+    h.includes("12 hs") ||
     h.includes("mediod")
   ) {
     return "12:00";
@@ -56,16 +52,16 @@ function normalizarHorario(horario) {
 
   if (
     h === "17" ||
+    h === "17:00" ||
     h === "17 00" ||
-    h === "17hs" ||
-    h === "17 hs" ||
-    h === "5 tarde" ||
+    h.includes("17hs") ||
+    h.includes("17 hs") ||
+    h.includes("5 tarde") ||
     h.includes("tarde")
   ) {
     return "17:00";
   }
 
-  // No aceptamos horarios fuera de 12:00 o 17:00.
   return "";
 }
 
@@ -75,426 +71,75 @@ function normalizarPago(pago) {
   if (!p) return "";
 
   if (p.includes("efectivo")) return "efectivo";
+
   if (p.includes("tarjeta") || p.includes("debito") || p.includes("credito")) {
     return "tarjeta";
   }
-  if (p.includes("transferencia") || p.includes("transf")) return "transferencia";
+
+  if (p.includes("transferencia") || p.includes("transf")) {
+    return "transferencia";
+  }
+
   if (p.includes("mercado pago") || p.includes("mercadopago") || p === "mp") {
     return "Mercado Pago";
   }
 
-  // Si dice una palabra que no es forma de pago, no la guardamos como pago.
   return "";
 }
 
 function calcularDatosFaltantes(pedido) {
   const faltantes = [];
+
   if (!pedido.productos) faltantes.push("productos");
   if (!pedido.cliente) faltantes.push("nombre");
   if (!pedido.direccion) faltantes.push("dirección");
   if (!pedido.pago) faltantes.push("forma de pago");
-  if (!pedido.horario_entrega) faltantes.push("horario de entrega (12:00 o 17:00)");
+  if (!pedido.horario_entrega) {
+    faltantes.push("horario de entrega (12:00 o 17:00)");
+  }
+
   return faltantes;
 }
 
 function agregarProducto(productosActuales, nuevoProducto) {
+  if (!nuevoProducto) return productosActuales || "";
   if (!productosActuales) return nuevoProducto;
   return productosActuales + "\n" + nuevoProducto;
 }
 
+function formatearProductos(productosBuscados) {
+  if (!Array.isArray(productosBuscados) || productosBuscados.length === 0) {
+    return "";
+  }
+
+  return productosBuscados
+    .filter((p) => p && p.producto)
+    .map((p) => {
+      const cantidad = p.cantidad || "";
+      const producto = String(p.producto || "").trim();
+
+      if (cantidad) {
+        return `${cantidad} ${producto}`;
+      }
+
+      return producto;
+    })
+    .join("\n");
+}
+
 function combinarPedido(anterior, nuevo) {
+  const productosNuevos = formatearProductos(nuevo.productos_buscados || []);
+
   return {
     cliente: nuevo.cliente || anterior.cliente || "",
     direccion: nuevo.direccion || anterior.direccion || "",
     pago: normalizarPago(nuevo.pago) || anterior.pago || "",
-    productos: anterior.productos || "",
+    productos: agregarProducto(anterior.productos || "", productosNuevos),
     horario_entrega: normalizarHorario(
       nuevo.horario_entrega || anterior.horario_entrega || ""
     ),
+    dudas_productos: nuevo.dudas_productos || [],
   };
-}
-
-function distanciaLevenshtein(a, b) {
-  a = String(a || "");
-  b = String(b || "");
-
-  const matriz = [];
-
-  for (let i = 0; i <= b.length; i++) {
-    matriz[i] = [i];
-  }
-
-  for (let j = 0; j <= a.length; j++) {
-    matriz[0][j] = j;
-  }
-
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matriz[i][j] = matriz[i - 1][j - 1];
-      } else {
-        matriz[i][j] = Math.min(
-          matriz[i - 1][j - 1] + 1,
-          matriz[i][j - 1] + 1,
-          matriz[i - 1][j] + 1
-        );
-      }
-    }
-  }
-
-  return matriz[b.length][a.length];
-}
-
-function obtenerAliasesPalabra(palabra) {
-  const p = normalizarTexto(palabra);
-
-  const aliases = {
-    "sachet": ["sachet", "sache", "sach"],
-    "sache": ["sachet", "sache", "sach"],
-    "descremada": ["descremada", "desc", "descrem"],
-    "descrem": ["descremada", "desc", "descrem"],
-    "coca": ["coca", "cola"],
-    "servilletas": ["servilletas", "servilleta"],
-    "servilleta": ["servilletas", "servilleta"],
-  };
-
-  return aliases[p] || [p];
-}
-
-function palabraCoincide(palabraBuscada, palabrasArticulo) {
-  const aliasesBuscadas = obtenerAliasesPalabra(palabraBuscada);
-
-  for (const alias of aliasesBuscadas) {
-    const p = normalizarTexto(alias);
-
-    for (const palabraArticulo of palabrasArticulo) {
-      const a = normalizarTexto(palabraArticulo);
-      const aliasesArticulo = obtenerAliasesPalabra(a);
-
-      for (const aliasArticulo of aliasesArticulo) {
-        const aa = normalizarTexto(aliasArticulo);
-
-        if (aa === p) return true;
-        if (aa === p + "s" || p === aa + "s") return true;
-        if (p.length >= 5 && aa.includes(p)) return true;
-        if (aa.length >= 5 && p.includes(aa)) return true;
-
-        if (p.length >= 5 && aa.length >= 5) {
-          const distancia = distanciaLevenshtein(p, aa);
-          if (distancia <= 2) return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
-
-function tieneVersionEspecial(art, productoBuscado) {
-  const palabrasArt = art.split(" ").filter(Boolean);
-
-  const indicadores = [
-    "sin",
-    "s",
-    "cero",
-    "zero",
-    "0",
-    "light",
-    "diet",
-    "bajo",
-    "baja",
-    "libre",
-    "reducido",
-    "reducida",
-  ];
-
-  const especiales = [
-    "azucar",
-    "sal",
-    "sodio",
-    "gluten",
-    "lactosa",
-    "alcohol",
-    "grasas",
-    "grasa",
-  ];
-
-  for (let i = 0; i < palabrasArt.length; i++) {
-    const actual = palabrasArt[i];
-    const siguiente = palabrasArt[i + 1] || "";
-    const siguiente2 = palabrasArt[i + 2] || "";
-
-    if (
-      indicadores.includes(actual) &&
-      (siguiente === productoBuscado ||
-        siguiente2 === productoBuscado ||
-        especiales.includes(siguiente) ||
-        especiales.includes(siguiente2))
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function buscarEnCatalogo(catalogo, busqueda, limite = 5) {
-  const q = normalizarTexto(busqueda);
-  if (!q || q.length < 2) return [];
-
-  const palabrasIgnorar = [
-    "quiero",
-    "dame",
-    "necesito",
-    "busco",
-    "comprar",
-    "llevo",
-    "pasame",
-    "un",
-    "una",
-    "uno",
-    "unos",
-    "unas",
-    "dos",
-    "tres",
-    "cuatro",
-    "cinco",
-    "seis",
-    "siete",
-    "ocho",
-    "nueve",
-    "diez",
-    "de",
-    "del",
-    "en",
-    "la",
-    "el",
-    "los",
-    "las",
-    "y",
-    "por",
-    "favor",
-  ];
-
-  const palabrasBuscadas = q
-    .split(" ")
-    .filter((p) => p.length > 1)
-    .filter((p) => !palabrasIgnorar.includes(p));
-
-  if (palabrasBuscadas.length === 0) return [];
-
-  const productosPrincipales = [
-    "azucar",
-    "sal",
-    "leche",
-    "aceite",
-    "yerba",
-    "arroz",
-    "fideo",
-    "fideos",
-    "harina",
-    "mayonesa",
-    "ketchup",
-    "mostaza",
-    "coca",
-    "sprite",
-    "fanta",
-    "agua",
-    "jugo",
-    "servilleta",
-    "servilletas",
-    "galletitas",
-    "galletita",
-    "pan",
-    "cafe",
-    "te",
-    "mate",
-    "dulce",
-    "atun",
-    "tomate",
-    "pure",
-    "salsa",
-    "vinagre",
-    "detergente",
-    "lavandina",
-    "jabon",
-    "shampoo",
-    "papel",
-  ];
-
-  const resultados = catalogo
-    .map((item) => {
-      const art = normalizarTexto(item.articulo);
-      const palabrasArticulo = art.split(" ").filter(Boolean);
-
-      let puntaje = 0;
-      let coincidencias = 0;
-
-      const detalleCoincidencias = palabrasBuscadas.map((palabra) => ({
-        palabra,
-        coincide: palabraCoincide(palabra, palabrasArticulo),
-      }));
-
-      coincidencias = detalleCoincidencias.filter((d) => d.coincide).length;
-      const faltantes = detalleCoincidencias.filter((d) => !d.coincide).length;
-
-      // Si no coincide ninguna palabra, no sirve.
-      if (coincidencias === 0) {
-        return {
-          ...item,
-          puntaje: -9999,
-          coincidencias,
-        };
-      }
-
-      // Base principal: cantidad de palabras coincidentes.
-      puntaje += coincidencias * 3000;
-
-      // Si coinciden todas las palabras, prioridad fuerte.
-      if (faltantes === 0) {
-        puntaje += 8000;
-      }
-
-      // Si faltan palabras en búsquedas detalladas, penaliza fuerte.
-      // Ejemplo: "mayonesa hellmanns" no debe mostrar "Natura Mayonesa".
-      if (palabrasBuscadas.length >= 2 && faltantes > 0) {
-        puntaje -= faltantes * 5000;
-      }
-
-      // Coincidencia de frase completa.
-      if (art === q) puntaje += 10000;
-      if (art.includes(q)) puntaje += 7000;
-      if (art.startsWith(q)) puntaje += 5000;
-
-      // Bonus por posición: mejor si las palabras aparecen al principio.
-      const posiciones = [];
-
-      for (const palabra of palabrasBuscadas) {
-        const pos = palabrasArticulo.findIndex((pa) =>
-          palabraCoincide(palabra, [pa])
-        );
-
-        if (pos !== -1) posiciones.push(pos);
-      }
-
-      if (posiciones.length > 0) {
-        const primeraPos = Math.min(...posiciones);
-
-        if (primeraPos === 0) puntaje += 2200;
-        else if (primeraPos === 1) puntaje += 1700;
-        else if (primeraPos === 2) puntaje += 900;
-        else puntaje += 200;
-      }
-
-      // Si es una búsqueda simple de producto principal,
-      // evitar que aparezca como característica secundaria.
-      if (
-        palabrasBuscadas.length === 1 &&
-        productosPrincipales.includes(palabrasBuscadas[0])
-      ) {
-        const producto = palabrasBuscadas[0];
-        const posProducto = palabrasArticulo.findIndex((pa) =>
-          palabraCoincide(producto, [pa])
-        );
-
-        if (posProducto === 0) puntaje += 2500;
-        else if (posProducto === 1) puntaje += 2000;
-        else if (posProducto === 2) puntaje += 900;
-        else if (posProducto >= 3) puntaje -= 1000;
-
-        if (tieneVersionEspecial(art, producto)) {
-          puntaje = -9999;
-        }
-      }
-
-      // Penalización general para "sin/cero/light" cuando afecta al producto buscado.
-      for (const palabra of palabrasBuscadas) {
-        if (tieneVersionEspecial(art, palabra)) {
-          puntaje -= 6000;
-        }
-      }
-
-      // Bonus por presentaciones comunes.
-      if (
-        art.includes("1 kg") ||
-        art.includes("1kg") ||
-        art.includes("1 lt") ||
-        art.includes("1lt") ||
-        art.includes("2 l") ||
-        art.includes("2l") ||
-        art.includes("500 gr") ||
-        art.includes("500gr") ||
-        art.includes("sachet")
-      ) {
-        puntaje += 200;
-      }
-
-      // Penaliza artículos demasiado largos cuando la búsqueda es corta.
-      if (palabrasArticulo.length > 7 && palabrasBuscadas.length <= 2) {
-        puntaje -= 250;
-      }
-
-      return {
-        ...item,
-        puntaje,
-        coincidencias,
-      };
-    })
-    .filter((item) => item.puntaje > 0);
-
-  if (resultados.length === 0) return [];
-
-  const maxCoincidencias = Math.max(...resultados.map((r) => r.coincidencias));
-
-  // Filtro clave:
-  // Si las mejores opciones tienen 3 coincidencias, no mostrar productos con 1.
-  // Esto evita que aparezcan vinagre/ketchup cuando se buscan servilletas o leche.
-  return resultados
-    .filter((item) => item.coincidencias >= Math.max(1, maxCoincidencias - 1))
-    .sort((a, b) => {
-      if (b.coincidencias !== a.coincidencias) {
-        return b.coincidencias - a.coincidencias;
-      }
-
-      return b.puntaje - a.puntaje;
-    })
-    .slice(0, limite);
-}
-
-async function obtenerCatalogo() {
-  const ahora = Date.now();
-
-  if (catalogoCache.length > 0 && ahora - catalogoUltimaCarga < 10 * 60 * 1000) {
-    return catalogoCache;
-  }
-
-  const auth = new google.auth.JWT(
-    GOOGLE_CLIENT_EMAIL,
-    null,
-    GOOGLE_PRIVATE_KEY,
-    ["https://www.googleapis.com/auth/spreadsheets"]
-  );
-
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const result = await sheets.spreadsheets.values.get({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Catalogo!A2:B",
-  });
-
-  const rows = result.data.values || [];
-
-  catalogoCache = rows
-    .filter((row) => row[0] && row[1])
-    .map((row) => ({
-      codigo: String(row[0]).trim(),
-      articulo: String(row[1]).trim(),
-    }));
-
-  catalogoUltimaCarga = ahora;
-
-  console.log("Catálogo cargado:", catalogoCache.length, "productos");
-  return catalogoCache;
 }
 
 async function guardarPedido({
@@ -578,6 +223,18 @@ async function enviarWhatsApp(to, body) {
 }
 
 async function finalizarOSolicitarDatos(from, pedidoActual) {
+  if (pedidoActual.dudas_productos && pedidoActual.dudas_productos.length > 0) {
+    pedidosEnCurso[from] = pedidoActual;
+
+    await enviarWhatsApp(
+      from,
+      "Para preparar bien el pedido, necesito que me aclares:\n" +
+        pedidoActual.dudas_productos.map((d) => `- ${d}`).join("\n")
+    );
+
+    return;
+  }
+
   const faltantes = calcularDatosFaltantes(pedidoActual);
 
   if (faltantes.length === 0) {
@@ -592,7 +249,6 @@ async function finalizarOSolicitarDatos(from, pedidoActual) {
     });
 
     delete pedidosEnCurso[from];
-    delete seleccionesPendientes[from];
 
     await enviarWhatsApp(
       from,
@@ -608,79 +264,6 @@ async function finalizarOSolicitarDatos(from, pedidoActual) {
     from,
     `Gracias. Para completar el pedido, pasame: ${faltantes.join(", ")}.`
   );
-}
-
-async function procesarProductos(from, catalogo, pedidoActual, productosPendientes) {
-  while (productosPendientes.length > 0) {
-    const prod = productosPendientes.shift();
-
-    const cantidad = prod.cantidad || 1;
-    const busqueda = prod.busqueda || "";
-
-    const opciones = buscarEnCatalogo(catalogo, busqueda, 5);
-
-    console.log("BUSQUEDA:", busqueda);
-
-    if (opciones.length === 0) {
-      console.log("Sin coincidencias para:", busqueda);
-
-      pedidosEnCurso[from] = pedidoActual;
-
-      seleccionesPendientes[from] = {
-        cantidad,
-        busqueda,
-        opciones: [],
-        productosPendientes,
-      };
-
-      await enviarWhatsApp(
-        from,
-        `No encontré "${busqueda}" en el catálogo. Escribime más detalles, por ejemplo marca, tamaño o presentación.`
-      );
-
-      return false;
-    }
-
-    opciones.forEach((op, i) => {
-      console.log(`${i + 1}. ${op.articulo} (${op.puntaje})`);
-    });
-
-    if (opciones.length === 1) {
-      pedidoActual.productos = agregarProducto(
-        pedidoActual.productos,
-        `${cantidad} ${opciones[0].articulo}`
-      );
-
-      continue;
-    }
-
-    pedidosEnCurso[from] = pedidoActual;
-
-    seleccionesPendientes[from] = {
-      cantidad,
-      busqueda,
-      opciones,
-      productosPendientes,
-    };
-
-    let mensaje = `Encontré varias opciones para "${busqueda}":\n\n`;
-
-    opciones.forEach((op, i) => {
-      mensaje += `${i + 1}. ${op.articulo}\n`;
-    });
-
-    mensaje += "\nRespondé con el número de la opción que querés.";
-
-    await enviarWhatsApp(from, mensaje);
-
-    return false;
-  }
-
-  pedidosEnCurso[from] = pedidoActual;
-
-  await finalizarOSolicitarDatos(from, pedidoActual);
-
-  return true;
 }
 
 app.get("/", (req, res) => {
@@ -720,106 +303,14 @@ app.post("/webhook", async (req, res) => {
     console.log("Mensaje recibido de:", from);
     console.log("Texto recibido:", text);
 
-    const catalogo = await obtenerCatalogo();
-
-    console.log("Productos en catálogo:", catalogo.length);
-
     const pedidoAnterior = pedidosEnCurso[from] || {
       cliente: "",
       direccion: "",
       pago: "",
       productos: "",
       horario_entrega: "",
+      dudas_productos: [],
     };
-
-    if (seleccionesPendientes[from]) {
-      const opcion = parseInt(text, 10);
-      const pendiente = seleccionesPendientes[from];
-
-      // Si responde con un número válido, elige una opción.
-      if (!isNaN(opcion) && opcion >= 1 && opcion <= pendiente.opciones.length) {
-        const elegido = pendiente.opciones[opcion - 1];
-        const productoFinal = `${pendiente.cantidad} ${elegido.articulo}`;
-
-        let pedidoActual = {
-          ...pedidoAnterior,
-          productos: agregarProducto(pedidoAnterior.productos, productoFinal),
-        };
-
-        const productosPendientes = pendiente.productosPendientes || [];
-
-        delete seleccionesPendientes[from];
-
-        await procesarProductos(from, catalogo, pedidoActual, productosPendientes);
-
-        return res.sendStatus(200);
-      }
-
-      // Si NO responde con número, interpretamos el mensaje como una búsqueda más detallada.
-      // Ejemplo:
-      // Bot: opciones para "mayonesa hellmanns"
-      // Cliente: "hellmanns mayonesa doy pack"
-      // Entonces se vuelve a buscar con ese texto, sin obligar a elegir número.
-      const busquedaRefinada = text;
-      let nuevasOpciones = buscarEnCatalogo(catalogo, busquedaRefinada, 5);
-
-      // Si no encuentra nada, probamos combinando la búsqueda anterior con la nueva.
-      if (nuevasOpciones.length === 0) {
-        nuevasOpciones = buscarEnCatalogo(
-          catalogo,
-          `${pendiente.busqueda} ${busquedaRefinada}`,
-          5
-        );
-      }
-
-      if (nuevasOpciones.length === 0) {
-        await enviarWhatsApp(
-          from,
-          `No encontré opciones para "${busquedaRefinada}". Probá escribiendo marca, producto y tamaño. Ejemplo: "mayonesa hellmanns 500gr".`
-        );
-
-        return res.sendStatus(200);
-      }
-
-      // Si encuentra una sola opción, la agrega directamente.
-      if (nuevasOpciones.length === 1) {
-        const productoFinal = `${pendiente.cantidad} ${nuevasOpciones[0].articulo}`;
-
-        let pedidoActual = {
-          ...pedidoAnterior,
-          productos: agregarProducto(pedidoAnterior.productos, productoFinal),
-        };
-
-        const productosPendientes = pendiente.productosPendientes || [];
-
-        delete seleccionesPendientes[from];
-
-        await procesarProductos(from, catalogo, pedidoActual, productosPendientes);
-
-        return res.sendStatus(200);
-      }
-
-      // Si encuentra varias, actualiza las opciones pendientes con la nueva búsqueda.
-      seleccionesPendientes[from] = {
-        cantidad: pendiente.cantidad,
-        busqueda: busquedaRefinada,
-        opciones: nuevasOpciones,
-        productosPendientes: pendiente.productosPendientes || [],
-      };
-
-      let mensaje = `Busqué mejor "${busquedaRefinada}" y encontré estas opciones:\n\n`;
-
-      nuevasOpciones.forEach((op, i) => {
-        mensaje += `${i + 1}. ${op.articulo}\n`;
-      });
-
-      mensaje +=
-        "\nRespondé con el número de la opción correcta, o escribí más detalles si todavía no está lo que buscás.";
-
-      await enviarWhatsApp(from, mensaje);
-
-      return res.sendStatus(200);
-    }
 
     const extractor = await openai.responses.create({
       model: "gpt-4.1-mini",
@@ -828,10 +319,16 @@ Extraé datos de pedido de WhatsApp para un autoservicio.
 
 Respondé SOLO JSON válido.
 
-Tené especial cuidado:
-- Los números 12 y 17 normalmente son horarios de entrega si aparecen junto a nombre, dirección o forma de pago.
-- No confundas horarios con cantidades.
-- No inventes productos.
+IMPORTANTE:
+- NO busques productos en ningún catálogo.
+- NO muestres opciones.
+- NO le pidas elegir número.
+- NO confirmes stock.
+- NO confirmes precio final.
+- El cliente puede escribir los productos como quiera.
+- Guardá los productos tal cual se entienden del mensaje.
+- Solo preguntá aclaraciones si falta cantidad o tamaño/presentación importante.
+- Un vendedor revisará disponibilidad y precio final después.
 
 Pedido anterior:
 ${JSON.stringify(pedidoAnterior)}
@@ -850,39 +347,49 @@ Devolvé este formato:
   "productos_buscados": [
     {
       "cantidad": 2,
-      "busqueda": "coca"
+      "producto": "coca 2L"
     }
-  ]
+  ],
+  "dudas_productos": []
 }
 
-Reglas:
+Reglas para productos:
 - Si el cliente pide productos, ponelos todos en productos_buscados.
+- Conservá marca, tamaño, presentación y detalles.
+- Si el producto está claro, NO preguntes nada.
+- Si falta cantidad, agregá una pregunta en dudas_productos.
+- Si falta tamaño o presentación en productos donde importa, agregá una pregunta en dudas_productos.
+- Si el cliente dice "coca" sin tamaño, preguntá: "¿De qué tamaño querés la Coca?"
+- Si el cliente dice "leche" sin tipo o presentación, preguntá: "¿Qué leche querés? Por ejemplo entera, descremada, sachet o caja."
+- Si el cliente dice "servilletas" sin tamaño, NO hace falta preguntar.
+- Si el cliente dice "azucar" sin tamaño, NO hace falta preguntar.
+- Si el cliente dice "yerba" sin marca o tamaño, preguntá marca o tamaño.
+- Si el cliente dice "aceite" sin tamaño o tipo, preguntá tamaño o tipo.
+- Si el cliente dice "gaseosa" sin marca o tamaño, preguntá marca y tamaño.
+- Si dice "quiero una leche descremada en sachet, 2 cocas 2L y servilletas", devolvé:
+  leche descremada en sachet cantidad 1,
+  coca 2L cantidad 2,
+  servilletas cantidad 1,
+  dudas_productos [].
 - Si dice "quiero mayonesa hellmanns, tres cocas y 1 azucar", devolvé:
   mayonesa hellmanns cantidad 1,
   coca cantidad 3,
-  azucar cantidad 1.
-- Si dice "quiero 2 coca, azúcar y tres leches", devolvé:
-  coca cantidad 2,
-  azúcar cantidad 1,
-  leche cantidad 3.
+  azucar cantidad 1,
+  dudas_productos ["¿De qué tamaño querés las cocas?"].
 - Convertí cantidades escritas en letras a números: una=1, un=1, dos=2, tres=3, cuatro=4, cinco=5.
-- Si no dice cantidad, asumí 1.
+- Si no dice cantidad y es un producto individual común, asumí 1.
+- Si realmente no queda clara la cantidad, preguntá.
+
+Reglas para datos:
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
-- MUY IMPORTANTE: si el mensaje parece completar datos personales y NO menciona productos nuevos, productos_buscados debe ser [].
 - Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 17, 5 de la tarde, tarde: horario_entrega = "17:00".
-- Si dice 11, 13, 15, 16, 17.30, 18 u otro horario distinto, dejá horario_entrega = "".
-- El negocio solo acepta entregas a las 12:00 o 17:00.
-- Si el cliente dice algo como "agustin, san juan 456, tarjeta y 12", interpretá 12 como horario_entrega "12:00", NO como cantidad de producto.
-- Si el cliente dice solo "12" o solo "17" y hay un pedido pendiente, interpretalo como horario_entrega.
+- Si dice otro horario distinto, dejá horario_entrega = "".
+- El negocio solo entrega a las 12:00 o 17:00.
 - Forma de pago válida solo puede ser: efectivo, tarjeta, transferencia o Mercado Pago.
-- Si el cliente escribe "agua", "gaseosa", "coca" u otro producto, NO lo pongas como pago.
-- Nunca inventes un producto llamado "producto".
-- Nunca agregues productos_buscados si el cliente solo está pasando nombre, dirección, forma de pago u horario.
-- Si el cliente escribe datos personales después de elegir productos, productos_buscados debe ser [].
-- No preguntes por monto mínimo.
-- No confirmes stock.
-- No confirmes precio final.
+- Si el cliente escribe "agua", "coca", "leche" u otro producto, NO lo pongas como pago.
+- Si el cliente solo pasa nombre, dirección, pago u horario, productos_buscados debe ser [].
+- Si el cliente responde una aclaración de producto, actualizá el pedido anterior y dejá dudas_productos [] si ya quedó claro.
 - Si no hay pedido ni datos de pedido, hay_pedido false.
       `,
     });
@@ -901,32 +408,32 @@ Reglas:
         pago: "",
         horario_entrega: "",
         productos_buscados: [],
+        dudas_productos: [],
       };
     }
 
     console.log("Datos extraídos:", data);
 
     const productosBuscados = data.productos_buscados || [];
+
     const tieneDatosPedido =
       data.hay_pedido ||
       productosBuscados.length > 0 ||
       data.cliente ||
       data.direccion ||
       data.pago ||
-      data.horario_entrega;
+      data.horario_entrega ||
+      (data.dudas_productos && data.dudas_productos.length > 0);
 
     if (tieneDatosPedido) {
-      let pedidoActual = combinarPedido(pedidoAnterior, {
+      const pedidoActual = combinarPedido(pedidoAnterior, {
         cliente: data.cliente,
         direccion: data.direccion,
         pago: data.pago,
         horario_entrega: data.horario_entrega,
+        productos_buscados: productosBuscados,
+        dudas_productos: data.dudas_productos || [],
       });
-
-      if (productosBuscados.length > 0) {
-        await procesarProductos(from, catalogo, pedidoActual, productosBuscados);
-        return res.sendStatus(200);
-      }
 
       pedidosEnCurso[from] = pedidoActual;
 
@@ -950,6 +457,7 @@ Información:
 
 Reglas:
 - Respondé breve, amable y en español argentino.
+- Si el cliente quiere hacer un pedido, pedile que escriba los productos.
 - No confirmes stock.
 - No confirmes precio final.
 - Un vendedor confirmará disponibilidad y precio final.
