@@ -637,6 +637,11 @@ Extraé datos de pedido de WhatsApp para un autoservicio.
 
 Respondé SOLO JSON válido.
 
+Tené especial cuidado:
+- Los números 12 y 17 normalmente son horarios de entrega si aparecen junto a nombre, dirección o forma de pago.
+- No confundas horarios con cantidades.
+- No inventes productos.
+
 Pedido anterior:
 ${JSON.stringify(pedidoAnterior)}
 
@@ -672,8 +677,12 @@ Reglas:
 - Convertí cantidades escritas en letras a números: una=1, un=1, dos=2, tres=3, cuatro=4, cinco=5.
 - Si no dice cantidad, asumí 1.
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
+- MUY IMPORTANTE: si el mensaje parece completar datos personales y NO menciona productos nuevos, productos_buscados debe ser [].
 - Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 5 de la tarde, tarde: horario_entrega = "17:00".
+- Si el cliente dice algo como "agustin, san juan 456, tarjeta y 12", interpretá 12 como horario_entrega "12:00", NO como cantidad de producto.
+- Nunca inventes un producto llamado "producto".
+- Nunca agregues productos_buscados si el cliente solo está pasando nombre, dirección, forma de pago u horario.
 - No preguntes por monto mínimo.
 - No confirmes stock.
 - No confirmes precio final.
