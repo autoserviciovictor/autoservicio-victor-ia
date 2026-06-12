@@ -160,7 +160,7 @@ function obtenerProductoPrincipal(producto) {
 
 function parsearLineaProducto(linea) {
   const texto = String(linea || "").trim();
-  const match = texto.match(/^(\\d+)\\s+(.+)$/);
+  const match = texto.match(/^(\d+)\s+(.+)$/);
 
   if (match) {
     return {
@@ -175,11 +175,30 @@ function parsearLineaProducto(linea) {
   };
 }
 
+function limpiarProductoYCantidad(cantidad, producto) {
+  let prod = String(producto || "").trim();
+  let cant = Number(cantidad || 1);
+
+  // Evita que se guarde "1 1 coca" cuando la IA devuelve
+  // cantidad: 1 y producto: "1 coca".
+  const match = prod.match(/^(\d+)\s+(.+)$/);
+
+  if (match) {
+    cant = Number(match[1]);
+    prod = match[2].trim();
+  }
+
+  return {
+    cantidad: cant || 1,
+    producto: prod,
+  };
+}
+
 function productosStringAItems(productos) {
   if (!productos) return [];
 
   return String(productos)
-    .split("\\n")
+    .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
     .map(parsearLineaProducto);
@@ -189,7 +208,7 @@ function productosItemsAString(items) {
   return items
     .filter((i) => i && i.producto)
     .map((i) => `${i.cantidad || 1} ${i.producto}`)
-    .join("\\n");
+    .join("\n");
 }
 
 function productosBuscadosAItems(productosBuscados) {
@@ -197,10 +216,7 @@ function productosBuscadosAItems(productosBuscados) {
 
   return productosBuscados
     .filter((p) => p && p.producto)
-    .map((p) => ({
-      cantidad: Number(p.cantidad || 1),
-      producto: String(p.producto || "").trim(),
-    }));
+    .map((p) => limpiarProductoYCantidad(p.cantidad, p.producto));
 }
 
 function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
