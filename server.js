@@ -385,6 +385,51 @@ async function asegurarEncabezadosHojaPrincipal(sheets) {
   });
 }
 
+async function aplicarDesplegableEstado(sheets) {
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+  });
+
+  const hoja = (spreadsheet.data.sheets || []).find(
+    (s) => s.properties.title === "Hoja 1"
+  );
+
+  if (!hoja) {
+    throw new Error("No se encontró la hoja principal: Hoja 1");
+  }
+
+  const sheetId = hoja.properties.sheetId;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          setDataValidation: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              startColumnIndex: 8,
+              endColumnIndex: 9,
+            },
+            rule: {
+              condition: {
+                type: "ONE_OF_LIST",
+                values: [
+                  { userEnteredValue: "Incompleto" },
+                  { userEnteredValue: "Completo" },
+                ],
+              },
+              showCustomUi: true,
+              strict: true,
+            },
+          },
+        },
+      ],
+    },
+  });
+}
+
 async function obtenerProximoNumeroPedido(sheets) {
   const respuesta = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEET_ID,
@@ -576,6 +621,7 @@ async function guardarPedido({
   });
 
   await asegurarEncabezadosHojaPrincipal(sheets);
+  await aplicarDesplegableEstado(sheets);
 
   const numeroPedido = await obtenerProximoNumeroPedido(sheets);
   const numeroPedidoFormateado = String(numeroPedido).padStart(6, "0");
