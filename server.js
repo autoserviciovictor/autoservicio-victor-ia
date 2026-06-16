@@ -146,16 +146,54 @@ function obtenerProductoPrincipal(producto) {
 
   const principales = [
     "coca", "leche", "azucar", "yerba", "aceite", "arroz",
-    "fideo", "fideos", "harina", "mayonesa", "servilleta",
-    "servilletas", "agua", "gaseosa", "pan", "galletitas",
-    "jugo", "sal", "cafe", "te"
+    "fideo", "harina", "mayonesa", "servilleta", "agua",
+    "gaseosa", "pan", "galletita", "jugo", "sal", "cafe", "te"
   ];
 
-  for (const p of palabras) {
-    if (principales.includes(p)) return p;
+  for (let palabra of palabras) {
+    palabra = normalizarSingularProducto(palabra);
+
+    if (principales.includes(palabra)) {
+      return palabra;
+    }
   }
 
-  return palabras[0] || "";
+  if (palabras.length > 0) {
+    return normalizarSingularProducto(palabras[0]);
+  }
+
+  return "";
+}
+
+function normalizarSingularProducto(palabra) {
+  let p = String(palabra || "").trim();
+
+  const equivalencias = {
+    cocas: "coca",
+    leches: "leche",
+    azucares: "azucar",
+    fideos: "fideo",
+    servilletas: "servilleta",
+    galletitas: "galletita",
+    gaseosas: "gaseosa",
+    aguas: "agua",
+    jugos: "jugo",
+    aceites: "aceite",
+    yerbas: "yerba",
+    harinas: "harina",
+    arroces: "arroz",
+    panes: "pan",
+  };
+
+  if (equivalencias[p]) return equivalencias[p];
+
+  if (p.endsWith("es") && p.length > 4) {
+    p = p.slice(0, -2);
+  } else if (p.endsWith("s") && p.length > 3) {
+    p = p.slice(0, -1);
+  }
+
+  return p;
 }
 
 function parsearLineaProducto(linea) {
@@ -223,76 +261,58 @@ function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
   const actuales = productosStringAItems(productosActuales);
   const nuevos = productosBuscadosAItems(productosNuevos);
 
-  if (nuevos.length === 0) {
-    return productosItemsAString(actuales);
-  }
-
   if (!esAclaracion) {
     return productosItemsAString([...actuales, ...nuevos]);
   }
 
-  // En aclaraciones:
-  // - Si el cliente aclara 2 coca -> coca 2l, se reemplaza y se conserva cantidad 2.
-  // - Si el cliente aclara 3 leche -> 2 leche entera + 1 leche descremada,
-  //   se reemplaza "3 leche" por las variantes nuevas.
-  // - Los productos que no fueron aclarados se conservan.
-  const nuevosPorPrincipal = new Map();
-
-  for (const nuevo of nuevos) {
-    const principal = obtenerProductoPrincipal(nuevo.producto);
-
-    if (!principal) {
-      const clave = `__sin_principal_${nuevosPorPrincipal.size}`;
-      nuevosPorPrincipal.set(clave, [nuevo]);
-      continue;
-    }
-
-    if (!nuevosPorPrincipal.has(principal)) {
-      nuevosPorPrincipal.set(principal, []);
-    }
-
-    nuevosPorPrincipal.get(principal).push(nuevo);
-  }
-
+  // En aclaraciones, reemplazamos productos ambiguos existentes.
+  // Caso simple:
+  //   2 coca -> coca 2l  => 2 coca 2l
+  // Caso dividido:
+  //   3 leche -> 2 leche entera + 1 leche descremada
+  //   => 2 leche entera + 1 leche descremada
+  const usados = new Set();
   const resultado = [];
 
   for (const actual of actuales) {
     const principalActual = obtenerProductoPrincipal(actual.producto);
 
-    if (principalActual && nuevosPorPrincipal.has(principalActual)) {
-      const variantes = nuevosPorPrincipal.get(principalActual);
+    const relacionados = nuevos
+      .map((nuevo, index) => ({ nuevo, index }))
+      .filter(({ nuevo }) => {
+        const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
+        return principalActual && principalNuevo && principalActual === principalNuevo;
+      });
 
-      if (variantes.length === 1) {
-        const variante = variantes[0];
-
-        resultado.push({
-          cantidad: actual.cantidad || variante.cantidad || 1,
-          producto: variante.producto,
-        });
-      } else {
-        for (const variante of variantes) {
-          resultado.push({
-            cantidad: variante.cantidad || 1,
-            producto: variante.producto,
-          });
-        }
-      }
-
-      nuevosPorPrincipal.delete(principalActual);
+    if (relacionados.length === 0) {
+      resultado.push(actual);
       continue;
     }
 
-    resultado.push(actual);
-  }
+    relacionados.forEach(({ index }) => usados.add(index));
 
-  for (const variantes of nuevosPorPrincipal.values()) {
-    for (const variante of variantes) {
+    if (relacionados.length === 1) {
+      const nuevo = relacionados[0].nuevo;
+
       resultado.push({
-        cantidad: variante.cantidad || 1,
-        producto: variante.producto,
+        cantidad: actual.cantidad || nuevo.cantidad || 1,
+        producto: nuevo.producto,
       });
+    } else {
+      for (const { nuevo } of relacionados) {
+        resultado.push({
+          cantidad: nuevo.cantidad || 1,
+          producto: nuevo.producto,
+        });
+      }
     }
   }
+
+  nuevos.forEach((nuevo, index) => {
+    if (!usados.has(index)) {
+      resultado.push(nuevo);
+    }
+  });
 
   return productosItemsAString(resultado);
 }
