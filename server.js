@@ -341,6 +341,237 @@ function combinarPedido(anterior, nuevo) {
   };
 }
 
+function calcularCantidadTotalProductos(productos) {
+  return productosStringAItems(productos).reduce((total, item) => {
+    const cantidad = Number(item.cantidad || 1);
+    return total + (Number.isFinite(cantidad) ? cantidad : 1);
+  }, 0);
+}
+
+function armarFilasPedidoImprimible({
+  numeroPedido,
+  fecha,
+  hora,
+  cliente,
+  telefono,
+  productos,
+  direccion,
+  pago,
+  horario_entrega,
+}) {
+  const items = productosStringAItems(productos);
+
+  const filas = [
+    ["AUTOSERVICIO VICTOR", "", ""],
+    [`Pedido #${numeroPedido}`, "", ""],
+    ["", "", ""],
+    ["Fecha", fecha, ""],
+    ["Hora", hora, ""],
+    ["Cliente", cliente, ""],
+    ["Teléfono", telefono, ""],
+    ["Dirección", direccion, ""],
+    ["Entrega", horario_entrega, ""],
+    ["Forma de Pago", pago, ""],
+    ["", "", ""],
+    ["✓", "Cantidad", "Producto"],
+  ];
+
+  for (const item of items) {
+    filas.push(["☐", item.cantidad || 1, item.producto]);
+  }
+
+  filas.push(
+    ["", "", ""],
+    ["Armó pedido", "________________________", ""],
+    ["Controló", "________________________", ""],
+    ["Pasó por caja", "________________________", ""]
+  );
+
+  return filas;
+}
+
+async function asegurarEncabezadosHojaPrincipal(sheets) {
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: "Hoja 1!A1:J1",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[
+        "Fecha",
+        "Hora",
+        "Cliente",
+        "Teléfono",
+        "Cant. Productos",
+        "Dirección",
+        "Forma de Pago",
+        "Horario Entrega",
+        "Estado",
+        "Ver Pedido",
+      ]],
+    },
+  });
+}
+
+async function obtenerProximoNumeroPedido(sheets) {
+  const respuesta = await sheets.spreadsheets.values.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: "Hoja 1!A2:A",
+  });
+
+  const filas = respuesta.data.values || [];
+  return filas.length + 1;
+}
+
+async function crearHojaPedidoImprimible(sheets, tituloBase) {
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+  });
+
+  const titulosExistentes = new Set(
+    (spreadsheet.data.sheets || []).map((s) => s.properties.title)
+  );
+
+  let titulo = tituloBase;
+  let contador = 2;
+
+  while (titulosExistentes.has(titulo)) {
+    titulo = `${tituloBase}_${contador}`;
+    contador += 1;
+  }
+
+  const respuesta = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title: titulo,
+              gridProperties: {
+                rowCount: 60,
+                columnCount: 6,
+              },
+            },
+          },
+        },
+      ],
+    },
+  });
+
+  const nuevaHoja = respuesta.data.replies[0].addSheet.properties;
+
+  return {
+    titulo: nuevaHoja.title,
+    sheetId: nuevaHoja.sheetId,
+  };
+}
+
+async function formatearHojaPedidoImprimible(sheets, sheetId) {
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: 1,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+        {
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              endRowIndex: 2,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: 2,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true, fontSize: 16 },
+                horizontalAlignment: "CENTER",
+              },
+            },
+            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 11,
+              endRowIndex: 12,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                horizontalAlignment: "CENTER",
+              },
+            },
+            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+          },
+        },
+        {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: "COLUMNS",
+              startIndex: 0,
+              endIndex: 1,
+            },
+            properties: { pixelSize: 80 },
+            fields: "pixelSize",
+          },
+        },
+        {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: "COLUMNS",
+              startIndex: 1,
+              endIndex: 2,
+            },
+            properties: { pixelSize: 110 },
+            fields: "pixelSize",
+          },
+        },
+        {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: "COLUMNS",
+              startIndex: 2,
+              endIndex: 3,
+            },
+            properties: { pixelSize: 360 },
+            fields: "pixelSize",
+          },
+        },
+      ],
+    },
+  });
+}
+
 async function guardarPedido({
   cliente,
   telefono,
@@ -371,10 +602,45 @@ async function guardarPedido({
     minute: "2-digit",
   });
 
+  await asegurarEncabezadosHojaPrincipal(sheets);
+
+  const numeroPedido = await obtenerProximoNumeroPedido(sheets);
+  const numeroPedidoFormateado = String(numeroPedido).padStart(6, "0");
+  const nombreHojaPedido = `Pedido_${numeroPedidoFormateado}`;
+  const cantidadTotalProductos = calcularCantidadTotalProductos(productos);
+
+  const hojaPedido = await crearHojaPedidoImprimible(sheets, nombreHojaPedido);
+
+  const filasPedido = armarFilasPedidoImprimible({
+    numeroPedido: numeroPedidoFormateado,
+    fecha,
+    hora,
+    cliente,
+    telefono,
+    productos,
+    direccion,
+    pago,
+    horario_entrega,
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: `'${hojaPedido.titulo}'!A1:C${filasPedido.length}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: filasPedido,
+    },
+  });
+
+  await formatearHojaPedidoImprimible(sheets, hojaPedido.sheetId);
+
+  const linkPedido = `=HIPERVINCULO("#gid=${hojaPedido.sheetId}";"Ver Pedido")`;
+
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Hoja 1!A:I",
+    range: "Hoja 1!A:J",
     valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
     requestBody: {
       values: [
         [
@@ -382,19 +648,19 @@ async function guardarPedido({
           hora,
           cliente,
           telefono,
-          productos,
+          cantidadTotalProductos,
           direccion,
           pago,
           horario_entrega,
           estado,
+          linkPedido,
         ],
       ],
     },
   });
 
-  console.log("Pedido guardado en Google Sheets");
+  console.log(`Pedido guardado en Google Sheets: ${nombreHojaPedido}`);
 }
-
 async function enviarWhatsApp(to, body) {
   await axios.post(
     `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
