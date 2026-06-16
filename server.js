@@ -101,33 +101,6 @@ function calcularDatosFaltantes(pedido) {
   return faltantes;
 }
 
-function agregarProducto(productosActuales, nuevoProducto) {
-  if (!nuevoProducto) return productosActuales || "";
-  if (!productosActuales) return nuevoProducto;
-  return productosActuales + "\n" + nuevoProducto;
-}
-
-function formatearProductos(productosBuscados) {
-  if (!Array.isArray(productosBuscados) || productosBuscados.length === 0) {
-    return "";
-  }
-
-  return productosBuscados
-    .filter((p) => p && p.producto)
-    .map((p) => {
-      const cantidad = p.cantidad || "";
-      const producto = String(p.producto || "").trim();
-
-      if (cantidad) {
-        return `${cantidad} ${producto}`;
-      }
-
-      return producto;
-    })
-    .join("\n");
-}
-
-
 function obtenerPalabrasClave(producto) {
   const ignorar = [
     "de", "del", "la", "el", "los", "las", "en", "con", "sin", "y",
@@ -410,225 +383,6 @@ async function asegurarEncabezadosHojaPrincipal(sheets) {
       ]],
     },
   });
-
-  await formatearHojaPrincipal(sheets);
-}
-
-async function obtenerSheetIdPorTitulo(sheets, titulo) {
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: GOOGLE_SHEET_ID,
-  });
-
-  const hoja = (spreadsheet.data.sheets || []).find(
-    (s) => s.properties.title === titulo
-  );
-
-  if (!hoja) {
-    throw new Error(`No se encontró la hoja: ${titulo}`);
-  }
-
-  return hoja.properties.sheetId;
-}
-
-async function formatearHojaPrincipal(sheets) {
-  const sheetId = await obtenerSheetIdPorTitulo(sheets, "Hoja 1");
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 0,
-              endRowIndex: 1,
-              startColumnIndex: 0,
-              endColumnIndex: 10,
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: { bold: true },
-                horizontalAlignment: "CENTER",
-                backgroundColor: { red: 0.85, green: 0.9, blue: 1 },
-              },
-            },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment,backgroundColor)",
-          },
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              startColumnIndex: 0,
-              endColumnIndex: 1,
-            },
-            cell: {
-              userEnteredFormat: {
-                numberFormat: { type: "DATE", pattern: "dd/mm/yyyy" },
-              },
-            },
-            fields: "userEnteredFormat.numberFormat",
-          },
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              startColumnIndex: 1,
-              endColumnIndex: 2,
-            },
-            cell: {
-              userEnteredFormat: {
-                numberFormat: { type: "TIME", pattern: "hh:mm" },
-              },
-            },
-            fields: "userEnteredFormat.numberFormat",
-          },
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              startColumnIndex: 7,
-              endColumnIndex: 8,
-            },
-            cell: {
-              userEnteredFormat: {
-                numberFormat: { type: "TIME", pattern: "hh:mm" },
-              },
-            },
-            fields: "userEnteredFormat.numberFormat",
-          },
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              startColumnIndex: 0,
-              endColumnIndex: 10,
-            },
-            cell: {
-              userEnteredFormat: {
-                verticalAlignment: "MIDDLE",
-                wrapStrategy: "WRAP",
-              },
-            },
-            fields: "userEnteredFormat(verticalAlignment,wrapStrategy)",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 },
-            properties: { pixelSize: 100 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 },
-            properties: { pixelSize: 90 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 },
-            properties: { pixelSize: 130 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 4 },
-            properties: { pixelSize: 140 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 4, endIndex: 5 },
-            properties: { pixelSize: 120 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 5, endIndex: 6 },
-            properties: { pixelSize: 160 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 6, endIndex: 7 },
-            properties: { pixelSize: 130 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 7, endIndex: 8 },
-            properties: { pixelSize: 120 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 8, endIndex: 9 },
-            properties: { pixelSize: 150 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 9, endIndex: 10 },
-            properties: { pixelSize: 120 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          setDataValidation: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              startColumnIndex: 8,
-              endColumnIndex: 9,
-            },
-            rule: {
-              condition: {
-                type: "ONE_OF_LIST",
-                values: [
-                  { userEnteredValue: "Pedido completo" },
-                  { userEnteredValue: "Pendiente" },
-                  { userEnteredValue: "Preparando" },
-                  { userEnteredValue: "Armado" },
-                  { userEnteredValue: "Facturado" },
-                  { userEnteredValue: "Entregado" },
-                  { userEnteredValue: "Cancelado" },
-                ],
-              },
-              showCustomUi: true,
-              strict: false,
-            },
-          },
-        },
-        {
-          updateSheetProperties: {
-            properties: {
-              sheetId,
-              gridProperties: { frozenRowCount: 1 },
-            },
-            fields: "gridProperties.frozenRowCount",
-          },
-        },
-      ],
-    },
-  });
 }
 
 async function obtenerProximoNumeroPedido(sheets) {
@@ -878,8 +632,6 @@ async function guardarPedido({
     },
   });
 
-  await formatearHojaPrincipal(sheets);
-
   console.log(`Pedido guardado en Google Sheets: ${nombreHojaPedido}`);
 }
 async function enviarWhatsApp(to, body) {
@@ -931,7 +683,7 @@ async function finalizarOSolicitarDatos(from, pedidoActual) {
       direccion: pedidoActual.direccion,
       pago: pedidoActual.pago,
       horario_entrega: pedidoActual.horario_entrega,
-      estado: "Pedido completo",
+      estado: "Incompleto",
     });
 
     delete pedidosEnCurso[from];
