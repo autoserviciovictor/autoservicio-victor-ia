@@ -518,17 +518,74 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             range: {
               sheetId,
               startRowIndex: 0,
+              endRowIndex: 1,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true, fontSize: 20 },
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
               endRowIndex: 2,
               startColumnIndex: 0,
               endColumnIndex: 3,
             },
             cell: {
               userEnteredFormat: {
-                textFormat: { bold: true, fontSize: 16 },
+                textFormat: { bold: true, fontSize: 18 },
                 horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 10,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                horizontalAlignment: "LEFT",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 10,
+              startColumnIndex: 1,
+              endColumnIndex: 2,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "RIGHT",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
           },
         },
         {
@@ -544,6 +601,76 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               userEnteredFormat: {
                 textFormat: { bold: true },
                 horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 12,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 12,
+              startColumnIndex: 1,
+              endColumnIndex: 2,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "RIGHT",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 12,
+              startColumnIndex: 2,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "LEFT",
+                verticalAlignment: "MIDDLE",
+                wrapStrategy: "WRAP",
+              },
+            },
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy)",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 17,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                horizontalAlignment: "LEFT",
               },
             },
             fields: "userEnteredFormat(textFormat,horizontalAlignment)",
@@ -557,7 +684,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               startIndex: 0,
               endIndex: 1,
             },
-            properties: { pixelSize: 80 },
+            properties: { pixelSize: 150 },
             fields: "pixelSize",
           },
         },
@@ -569,7 +696,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               startIndex: 1,
               endIndex: 2,
             },
-            properties: { pixelSize: 110 },
+            properties: { pixelSize: 170 },
             fields: "pixelSize",
           },
         },
@@ -581,7 +708,19 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               startIndex: 2,
               endIndex: 3,
             },
-            properties: { pixelSize: 360 },
+            properties: { pixelSize: 450 },
+            fields: "pixelSize",
+          },
+        },
+        {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: "ROWS",
+              startIndex: 0,
+              endIndex: 2,
+            },
+            properties: { pixelSize: 42 },
             fields: "pixelSize",
           },
         },
@@ -589,7 +728,6 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
     },
   });
 }
-
 async function guardarPedido({
   cliente,
   telefono,
