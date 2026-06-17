@@ -1003,6 +1003,9 @@ Reglas para productos:
 - Si realmente no queda clara la cantidad, preguntá.
 
 Reglas para datos:
+- MUY IMPORTANTE: si existe un pedido anterior, interpretá el mensaje nuevo como continuación del pedido, aunque sea una sola palabra o número.
+- Si el pedido anterior está esperando horario y el cliente responde 12, 12hs, 17 o 17hs, extraé horario_entrega.
+- Si el pedido anterior está esperando forma de pago y el cliente responde efectivo, tarjeta, transferencia o Mercado Pago, extraé pago.
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
 - Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 17, 5 de la tarde, tarde: horario_entrega = "17:00".
@@ -1040,6 +1043,19 @@ Reglas para datos:
 
     console.log("Datos extraídos:", data);
 
+    // Si hay un pedido abierto, cualquier mensaje corto puede ser una continuación.
+    // Esto evita que respuestas como "12", "12hs", "17" o "efectivo"
+    // caigan en el chat general cuando el pedido todavía está incompleto.
+    if (pedidosEnCurso[from]) {
+      if (!data.horario_entrega) {
+        data.horario_entrega = normalizarHorario(text);
+      }
+
+      if (!data.pago) {
+        data.pago = normalizarPago(text);
+      }
+    }
+
     const productosBuscados = data.productos_buscados || [];
 
     const tieneDatosPedido =
@@ -1051,7 +1067,7 @@ Reglas para datos:
       data.horario_entrega ||
       (data.dudas_productos && data.dudas_productos.length > 0);
 
-    if (tieneDatosPedido) {
+    if (tieneDatosPedido || pedidosEnCurso[from]) {
       const pedidoActual = combinarPedido(pedidoAnterior, {
         cliente: data.cliente,
         direccion: data.direccion,
