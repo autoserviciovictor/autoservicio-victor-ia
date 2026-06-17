@@ -328,6 +328,77 @@ function quitarProductosYaExistentes(productosActuales, productosNuevos) {
   return nuevos.filter((nuevo) => !clavesActuales.has(claveProducto(nuevo)));
 }
 
+
+function cantidadDesdeTexto(texto) {
+  const t = normalizarTexto(texto);
+
+  const numeros = t.match(/\b\d+\b/g);
+  if (numeros && numeros.length > 0) {
+    const n = Number(numeros[0]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  const cantidades = {
+    un: 1,
+    una: 1,
+    uno: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+    siete: 7,
+    ocho: 8,
+    nueve: 9,
+    diez: 10,
+  };
+
+  for (const [palabra, valor] of Object.entries(cantidades)) {
+    if (new RegExp(`\\b${palabra}\\b`).test(t)) {
+      return valor;
+    }
+  }
+
+  return 1;
+}
+
+function completarProductosPendientesDesdeDudas(texto, dudasProductos, productosBuscados) {
+  if (Array.isArray(productosBuscados) && productosBuscados.length > 0) {
+    return productosBuscados;
+  }
+
+  if (!Array.isArray(dudasProductos) || dudasProductos.length === 0) {
+    return productosBuscados || [];
+  }
+
+  const t = normalizarTexto(texto);
+  const dudas = dudasProductos.map((d) => normalizarTexto(d)).join(" ");
+  const cantidad = cantidadDesdeTexto(texto);
+  const pendientes = [];
+
+  if (dudas.includes("coca") && /\bcoca(s)?\b/.test(t)) {
+    pendientes.push({ cantidad, producto: "coca" });
+  }
+
+  if (dudas.includes("leche") && /\bleche(s)?\b/.test(t)) {
+    pendientes.push({ cantidad, producto: "leche" });
+  }
+
+  if (dudas.includes("yerba") && /\byerba(s)?\b/.test(t)) {
+    pendientes.push({ cantidad, producto: "yerba" });
+  }
+
+  if (dudas.includes("aceite") && /\baceite(s)?\b/.test(t)) {
+    pendientes.push({ cantidad, producto: "aceite" });
+  }
+
+  if (dudas.includes("gaseosa") && /\bgaseosa(s)?\b/.test(t)) {
+    pendientes.push({ cantidad, producto: "gaseosa" });
+  }
+
+  return pendientes.length > 0 ? pendientes : (productosBuscados || []);
+}
+
 function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
   const actuales = productosStringAItems(productosActuales);
   const nuevos = productosBuscadosAItems(productosNuevos);
@@ -1043,6 +1114,7 @@ Devolvé este formato:
 
 Reglas para productos:
 - Si el cliente pide productos, ponelos todos en productos_buscados.
+- Si un producto requiere aclaración, igual agregalo en productos_buscados con cantidad y producto base. Ejemplo: "quiero 2 coca" debe devolver productos_buscados [{"cantidad":2,"producto":"coca"}] y dudas_productos ["¿De qué tamaño querés la Coca?"].
 - Conservá marca, tamaño, presentación y detalles.
 - Si el producto está claro, NO preguntes nada.
 - Si falta cantidad, agregá una pregunta en dudas_productos.
@@ -1112,7 +1184,11 @@ Reglas para datos:
 
     console.log("Datos extraídos:", data);
 
-    let productosBuscados = data.productos_buscados || [];
+    let productosBuscados = completarProductosPendientesDesdeDudas(
+      text,
+      data.dudas_productos || [],
+      data.productos_buscados || []
+    );
 
     // Si hay un pedido abierto y el cliente solo está completando un dato
     // (por ejemplo: "12", "15", "efectivo", "agustin"), no volvemos a sumar
