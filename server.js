@@ -230,6 +230,87 @@ function productosBuscadosAItems(productosBuscados) {
     .map((p) => limpiarProductoYCantidad(p.cantidad, p.producto));
 }
 
+function productoTieneTamanioOPresentacion(producto) {
+  const p = normalizarTexto(producto);
+
+  return /\b\d+(\.\d+)?\s*(l|lt|lts|litro|litros|ml|cc|kg|kilo|kilos|gr|g)\b/.test(p) ||
+    p.includes("sachet") ||
+    p.includes("botella") ||
+    p.includes("caja") ||
+    p.includes("lata") ||
+    p.includes("pack");
+}
+
+function filtrarDudasInnecesarias(dudas, productosActuales, productosNuevos) {
+  if (!Array.isArray(dudas) || dudas.length === 0) return [];
+
+  const items = [
+    ...productosStringAItems(productosActuales || ""),
+    ...productosBuscadosAItems(productosNuevos || []),
+  ];
+
+  return dudas.filter((duda) => {
+    const d = normalizarTexto(duda);
+
+    const hayCocaConTamanio = items.some(
+      (item) => obtenerProductoPrincipal(item.producto) === "coca" && productoTieneTamanioOPresentacion(item.producto)
+    );
+
+    if (hayCocaConTamanio && d.includes("coca") && (d.includes("tamano") || d.includes("tamaño"))) {
+      return false;
+    }
+
+    const hayLecheConPresentacion = items.some(
+      (item) => obtenerProductoPrincipal(item.producto) === "leche" && productoTieneTamanioOPresentacion(item.producto)
+    );
+
+    if (hayLecheConPresentacion && d.includes("leche")) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function textoContieneProductoClaro(texto) {
+  const t = normalizarTexto(texto);
+  if (!t) return false;
+
+  const palabras = obtenerPalabrasClave(t);
+  return palabras.some((p) => {
+    const principal = obtenerProductoPrincipal(p);
+    return [
+      "coca", "leche", "azucar", "yerba", "aceite", "arroz", "fideo",
+      "harina", "mayonesa", "servilleta", "agua", "gaseosa", "pan",
+      "galletita", "jugo", "sal", "cafe", "te"
+    ].includes(principal);
+  });
+}
+
+function mensajeEsSoloDatoComplementario(texto) {
+  const t = normalizarTexto(texto);
+  if (!t) return false;
+
+  if (normalizarHorario(t)) return true;
+  if (/^\d{1,2}([:.]\d{2})?\s*(hs|h)?$/.test(t)) return true;
+  if (normalizarPago(t)) return true;
+
+  const palabrasDePedido = ["quiero", "agrega", "agregar", "tambien", "también", "sumame", "mandame", "llevo"];
+  if (palabrasDePedido.some((p) => t.includes(p))) return false;
+
+  if (textoContieneProductoClaro(t)) return false;
+
+  const palabras = t.split(" ").filter(Boolean);
+
+  // Nombre simple: "agustin", "juan perez".
+  if (/^[a-z\s]+$/.test(t) && palabras.length <= 4) return true;
+
+  // Dirección simple: "san juan 456", "calle roca 123".
+  if (/\d/.test(t) && palabras.length <= 6) return true;
+
+  return false;
+}
+
 function claveProducto(item) {
   return `${Number(item.cantidad || 1)}|${normalizarTexto(item.producto)}`;
 }
@@ -339,7 +420,11 @@ function combinarPedido(anterior, nuevo) {
       esAclaracion
     ),
     horario_entrega: horarioNuevoNormalizado || anterior.horario_entrega || "",
-    dudas_productos: nuevo.dudas_productos || [],
+    dudas_productos: filtrarDudasInnecesarias(
+      nuevo.dudas_productos || [],
+      anterior.productos || "",
+      nuevo.productos_buscados || []
+    ),
   };
 }
 
@@ -963,7 +1048,9 @@ Reglas para productos:
 - Si falta cantidad, agregá una pregunta en dudas_productos.
 - Si falta tamaño o presentación en productos donde importa, agregá una pregunta en dudas_productos.
 - Si el cliente dice "coca" sin tamaño, preguntá: "¿De qué tamaño querés la Coca?"
+- Si el cliente dice "coca 2l", "coca 3l", "coca 1.5l", "coca 500ml" o cualquier Coca con tamaño, NO preguntes tamaño.
 - Si el cliente dice "leche" sin tipo o presentación, preguntá: "¿Qué leche querés? Por ejemplo entera, descremada, sachet o caja."
+- Si el cliente dice "leche entera en sachet", "leche descremada en botella" o cualquier leche con tipo/presentación clara, NO preguntes nada.
 - Si el cliente dice "servilletas" sin tamaño, NO hace falta preguntar.
 - Si el cliente dice "azucar" sin tamaño, NO hace falta preguntar.
 - Si el cliente dice "yerba" sin marca o tamaño, preguntá marca o tamaño.
@@ -988,6 +1075,7 @@ Reglas para datos:
 - Si el mensaje nuevo es solo un dato faltante del pedido anterior, interpretalo como continuación del pedido.
 - Si existe pedido anterior y el mensaje nuevo es solo "12", "12hs", "17" o "17hs", cargalo como horario_entrega.
 - El único horario_entrega válido es "12:00" o "17:00".
+- Si el cliente dice 11, 11hs, 13, 14, 15, 16, 18 u otro horario distinto a 12 o 17, dejá horario_entrega = "".
 - Si dice 12hs, 12 o mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 17, 5 de la tarde: horario_entrega = "17:00".
 - Si dice cualquier otro horario distinto, dejá horario_entrega = "".
@@ -1024,7 +1112,14 @@ Reglas para datos:
 
     console.log("Datos extraídos:", data);
 
-    const productosBuscados = data.productos_buscados || [];
+    let productosBuscados = data.productos_buscados || [];
+
+    // Si hay un pedido abierto y el cliente solo está completando un dato
+    // (por ejemplo: "12", "15", "efectivo", "agustin"), no volvemos a sumar
+    // productos que la IA pueda repetir desde el pedido anterior.
+    if (pedidosEnCurso[from] && mensajeEsSoloDatoComplementario(text)) {
+      productosBuscados = [];
+    }
 
     const tieneDatosPedido =
       data.hay_pedido ||
