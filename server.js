@@ -43,6 +43,7 @@ function normalizarHorario(horario) {
     h === "12" ||
     h === "12:00" ||
     h === "12 00" ||
+    h === "12.00" ||
     h.includes("12hs") ||
     h.includes("12 hs") ||
     h.includes("mediod")
@@ -54,10 +55,11 @@ function normalizarHorario(horario) {
     h === "17" ||
     h === "17:00" ||
     h === "17 00" ||
+    h === "17.00" ||
     h.includes("17hs") ||
     h.includes("17 hs") ||
     h.includes("5 tarde") ||
-    h.includes("tarde")
+    h.includes("cinco tarde")
   ) {
     return "17:00";
   }
@@ -114,30 +116,6 @@ function obtenerPalabrasClave(producto) {
     .filter((p) => !ignorar.includes(p));
 }
 
-function obtenerProductoPrincipal(producto) {
-  const palabras = obtenerPalabrasClave(producto);
-
-  const principales = [
-    "coca", "leche", "azucar", "yerba", "aceite", "arroz",
-    "fideo", "harina", "mayonesa", "servilleta", "agua",
-    "gaseosa", "pan", "galletita", "jugo", "sal", "cafe", "te"
-  ];
-
-  for (let palabra of palabras) {
-    palabra = normalizarSingularProducto(palabra);
-
-    if (principales.includes(palabra)) {
-      return palabra;
-    }
-  }
-
-  if (palabras.length > 0) {
-    return normalizarSingularProducto(palabras[0]);
-  }
-
-  return "";
-}
-
 function normalizarSingularProducto(palabra) {
   let p = String(palabra || "").trim();
 
@@ -169,6 +147,30 @@ function normalizarSingularProducto(palabra) {
   return p;
 }
 
+function obtenerProductoPrincipal(producto) {
+  const palabras = obtenerPalabrasClave(producto);
+
+  const principales = [
+    "coca", "leche", "azucar", "yerba", "aceite", "arroz",
+    "fideo", "harina", "mayonesa", "servilleta", "agua",
+    "gaseosa", "pan", "galletita", "jugo", "sal", "cafe", "te"
+  ];
+
+  for (let palabra of palabras) {
+    palabra = normalizarSingularProducto(palabra);
+
+    if (principales.includes(palabra)) {
+      return palabra;
+    }
+  }
+
+  if (palabras.length > 0) {
+    return normalizarSingularProducto(palabras[0]);
+  }
+
+  return "";
+}
+
 function parsearLineaProducto(linea) {
   const texto = String(linea || "").trim();
   const match = texto.match(/^(\d+)\s+(.+)$/);
@@ -190,8 +192,6 @@ function limpiarProductoYCantidad(cantidad, producto) {
   let prod = String(producto || "").trim();
   let cant = Number(cantidad || 1);
 
-  // Evita que se guarde "1 1 coca" cuando la IA devuelve
-  // cantidad: 1 y producto: "1 coca".
   const match = prod.match(/^(\d+)\s+(.+)$/);
 
   if (match) {
@@ -230,20 +230,42 @@ function productosBuscadosAItems(productosBuscados) {
     .map((p) => limpiarProductoYCantidad(p.cantidad, p.producto));
 }
 
+function claveProducto(item) {
+  return `${Number(item.cantidad || 1)}|${normalizarTexto(item.producto)}`;
+}
+
+function quitarProductosYaExistentes(productosActuales, productosNuevos) {
+  const actuales = productosStringAItems(productosActuales);
+  const nuevos = productosBuscadosAItems(productosNuevos);
+
+  if (actuales.length === 0 || nuevos.length === 0) {
+    return productosNuevos || [];
+  }
+
+  const clavesActuales = new Set(actuales.map(claveProducto));
+
+  return nuevos.filter((nuevo) => !clavesActuales.has(claveProducto(nuevo)));
+}
+
 function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
   const actuales = productosStringAItems(productosActuales);
   const nuevos = productosBuscadosAItems(productosNuevos);
 
   if (!esAclaracion) {
-    return productosItemsAString([...actuales, ...nuevos]);
+    const existentes = new Set(actuales.map(claveProducto));
+    const resultado = [...actuales];
+
+    for (const nuevo of nuevos) {
+      const clave = claveProducto(nuevo);
+      if (!existentes.has(clave)) {
+        resultado.push(nuevo);
+        existentes.add(clave);
+      }
+    }
+
+    return productosItemsAString(resultado);
   }
 
-  // En aclaraciones, reemplazamos productos ambiguos existentes.
-  // Caso simple:
-  //   2 coca -> coca 2l  => 2 coca 2l
-  // Caso dividido:
-  //   3 leche -> 2 leche entera + 1 leche descremada
-  //   => 2 leche entera + 1 leche descremada
   const usados = new Set();
   const resultado = [];
 
@@ -291,25 +313,32 @@ function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
 }
 
 function combinarPedido(anterior, nuevo) {
-  const productosNuevos = nuevo.productos_buscados || [];
+  let productosNuevos = nuevo.productos_buscados || [];
+
+  const horarioNuevoNormalizado = normalizarHorario(nuevo.horario_entrega || "");
+  const pagoNuevoNormalizado = normalizarPago(nuevo.pago || "");
 
   const esAclaracion =
     Array.isArray(anterior.dudas_productos) &&
     anterior.dudas_productos.length > 0 &&
     productosNuevos.length > 0;
 
+  // Si ya hay pedido abierto y la IA vuelve a devolver los mismos productos anteriores
+  // mientras el cliente solo está completando datos u horarios, no los sumamos otra vez.
+  if (!esAclaracion && anterior.productos) {
+    productosNuevos = quitarProductosYaExistentes(anterior.productos, productosNuevos);
+  }
+
   return {
     cliente: nuevo.cliente || anterior.cliente || "",
     direccion: nuevo.direccion || anterior.direccion || "",
-    pago: normalizarPago(nuevo.pago) || anterior.pago || "",
+    pago: pagoNuevoNormalizado || anterior.pago || "",
     productos: fusionarProductos(
       anterior.productos || "",
       productosNuevos,
       esAclaracion
     ),
-    horario_entrega: normalizarHorario(
-      nuevo.horario_entrega || anterior.horario_entrega || ""
-    ),
+    horario_entrega: horarioNuevoNormalizado || anterior.horario_entrega || "",
     dudas_productos: nuevo.dudas_productos || [],
   };
 }
@@ -319,6 +348,11 @@ function calcularCantidadTotalProductos(productos) {
     const cantidad = Number(item.cantidad || 1);
     return total + (Number.isFinite(cantidad) ? cantidad : 1);
   }, 0);
+}
+
+function textoParaSheets(valor) {
+  if (valor === null || valor === undefined) return "";
+  return `'${String(valor)}`;
 }
 
 function armarFilasPedidoImprimible({
@@ -395,7 +429,7 @@ async function aplicarDesplegableEstado(sheets) {
   );
 
   if (!hoja) {
-    throw new Error("No se encontró la hoja principal: Hoja 1");
+    throw new Error("No se encontró la Hoja 1");
   }
 
   const sheetId = hoja.properties.sheetId;
@@ -526,10 +560,9 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               userEnteredFormat: {
                 textFormat: { bold: true, fontSize: 20 },
                 horizontalAlignment: "CENTER",
-                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
           },
         },
         {
@@ -543,12 +576,11 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             },
             cell: {
               userEnteredFormat: {
-                textFormat: { bold: true, fontSize: 18 },
+                textFormat: { bold: true, fontSize: 16 },
                 horizontalAlignment: "CENTER",
-                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
           },
         },
         {
@@ -563,11 +595,9 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             cell: {
               userEnteredFormat: {
                 textFormat: { bold: true },
-                horizontalAlignment: "LEFT",
-                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+            fields: "userEnteredFormat.textFormat",
           },
         },
         {
@@ -582,10 +612,9 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             cell: {
               userEnteredFormat: {
                 horizontalAlignment: "RIGHT",
-                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
+            fields: "userEnteredFormat.horizontalAlignment",
           },
         },
         {
@@ -601,27 +630,9 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               userEnteredFormat: {
                 textFormat: { bold: true },
                 horizontalAlignment: "CENTER",
-                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
-          },
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 12,
-              startColumnIndex: 0,
-              endColumnIndex: 1,
-            },
-            cell: {
-              userEnteredFormat: {
-                horizontalAlignment: "CENTER",
-                verticalAlignment: "MIDDLE",
-              },
-            },
-            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
+            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
           },
         },
         {
@@ -635,10 +646,9 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             cell: {
               userEnteredFormat: {
                 horizontalAlignment: "RIGHT",
-                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
+            fields: "userEnteredFormat.horizontalAlignment",
           },
         },
         {
@@ -652,28 +662,9 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             cell: {
               userEnteredFormat: {
                 horizontalAlignment: "LEFT",
-                verticalAlignment: "MIDDLE",
-                wrapStrategy: "WRAP",
               },
             },
-            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy)",
-          },
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 17,
-              startColumnIndex: 0,
-              endColumnIndex: 1,
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: { bold: true },
-                horizontalAlignment: "LEFT",
-              },
-            },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+            fields: "userEnteredFormat.horizontalAlignment",
           },
         },
         {
@@ -684,7 +675,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               startIndex: 0,
               endIndex: 1,
             },
-            properties: { pixelSize: 150 },
+            properties: { pixelSize: 130 },
             fields: "pixelSize",
           },
         },
@@ -696,7 +687,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               startIndex: 1,
               endIndex: 2,
             },
-            properties: { pixelSize: 170 },
+            properties: { pixelSize: 150 },
             fields: "pixelSize",
           },
         },
@@ -708,19 +699,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               startIndex: 2,
               endIndex: 3,
             },
-            properties: { pixelSize: 450 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: "ROWS",
-              startIndex: 0,
-              endIndex: 2,
-            },
-            properties: { pixelSize: 42 },
+            properties: { pixelSize: 430 },
             fields: "pixelSize",
           },
         },
@@ -728,6 +707,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
     },
   });
 }
+
 async function guardarPedido({
   cliente,
   telefono,
@@ -801,14 +781,14 @@ async function guardarPedido({
     requestBody: {
       values: [
         [
-          fecha,
-          hora,
+          textoParaSheets(fecha),
+          textoParaSheets(hora),
           cliente,
           telefono,
           cantidadTotalProductos,
           direccion,
           pago,
-          horario_entrega,
+          textoParaSheets(horario_entrega),
           estado,
           linkPedido,
         ],
@@ -818,6 +798,7 @@ async function guardarPedido({
 
   console.log(`Pedido guardado en Google Sheets: ${nombreHojaPedido}`);
 }
+
 async function enviarWhatsApp(to, body) {
   await axios.post(
     `https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`,
@@ -1003,13 +984,13 @@ Reglas para productos:
 - Si realmente no queda clara la cantidad, preguntá.
 
 Reglas para datos:
-- MUY IMPORTANTE: si existe un pedido anterior, interpretá el mensaje nuevo como continuación del pedido, aunque sea una sola palabra o número.
-- Si el pedido anterior está esperando horario y el cliente responde 12, 12hs, 17 o 17hs, extraé horario_entrega.
-- Si el pedido anterior está esperando forma de pago y el cliente responde efectivo, tarjeta, transferencia o Mercado Pago, extraé pago.
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
-- Si dice 12hs, 12, mediodía: horario_entrega = "12:00".
-- Si dice 17hs, 17, 5 de la tarde, tarde: horario_entrega = "17:00".
-- Si dice otro horario distinto, dejá horario_entrega = "".
+- Si el mensaje nuevo es solo un dato faltante del pedido anterior, interpretalo como continuación del pedido.
+- Si existe pedido anterior y el mensaje nuevo es solo "12", "12hs", "17" o "17hs", cargalo como horario_entrega.
+- El único horario_entrega válido es "12:00" o "17:00".
+- Si dice 12hs, 12 o mediodía: horario_entrega = "12:00".
+- Si dice 17hs, 17, 5 de la tarde: horario_entrega = "17:00".
+- Si dice cualquier otro horario distinto, dejá horario_entrega = "".
 - El negocio solo entrega a las 12:00 o 17:00.
 - Forma de pago válida solo puede ser: efectivo, tarjeta, transferencia o Mercado Pago.
 - Si el cliente escribe "agua", "coca", "leche" u otro producto, NO lo pongas como pago.
@@ -1042,19 +1023,6 @@ Reglas para datos:
     }
 
     console.log("Datos extraídos:", data);
-
-    // Si hay un pedido abierto, cualquier mensaje corto puede ser una continuación.
-    // Esto evita que respuestas como "12", "12hs", "17" o "efectivo"
-    // caigan en el chat general cuando el pedido todavía está incompleto.
-    if (pedidosEnCurso[from]) {
-      if (!data.horario_entrega) {
-        data.horario_entrega = normalizarHorario(text);
-      }
-
-      if (!data.pago) {
-        data.pago = normalizarPago(text);
-      }
-    }
 
     const productosBuscados = data.productos_buscados || [];
 
