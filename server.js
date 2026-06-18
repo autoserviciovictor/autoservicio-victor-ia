@@ -315,6 +315,32 @@ function claveProducto(item) {
   return `${Number(item.cantidad || 1)}|${normalizarTexto(item.producto)}`;
 }
 
+function productoEsMasCompleto(productoCompleto, productoSimple) {
+  const completo = normalizarTexto(productoCompleto);
+  const simple = normalizarTexto(productoSimple);
+
+  if (!completo || !simple) return false;
+  if (completo === simple) return true;
+
+  const principalCompleto = obtenerProductoPrincipal(completo);
+  const principalSimple = obtenerProductoPrincipal(simple);
+
+  if (!principalCompleto || !principalSimple || principalCompleto !== principalSimple) {
+    return false;
+  }
+
+  const completoTieneDetalle =
+    productoTieneTamanioOPresentacion(completo) ||
+    completo.split(" ").length > simple.split(" ").length;
+
+  const simpleTieneDetalle = productoTieneTamanioOPresentacion(simple);
+
+  // Ejemplo:
+  // actual: "coca 2l" / nuevo: "coca" => ignorar nuevo.
+  // actual: "leche entera en sachet" / nuevo: "leche" => ignorar nuevo.
+  return completoTieneDetalle && !simpleTieneDetalle;
+}
+
 function quitarProductosYaExistentes(productosActuales, productosNuevos) {
   const actuales = productosStringAItems(productosActuales);
   const nuevos = productosBuscadosAItems(productosNuevos);
@@ -325,7 +351,33 @@ function quitarProductosYaExistentes(productosActuales, productosNuevos) {
 
   const clavesActuales = new Set(actuales.map(claveProducto));
 
-  return nuevos.filter((nuevo) => !clavesActuales.has(claveProducto(nuevo)));
+  return nuevos.filter((nuevo) => {
+    // Evita duplicados exactos cuando la IA repite el pedido anterior.
+    if (clavesActuales.has(claveProducto(nuevo))) {
+      return false;
+    }
+
+    // Evita que la IA vuelva hacia atrás y reemplace/agregue un producto incompleto
+    // cuando el pedido anterior ya tenía la aclaración completa.
+    // Ejemplo: actual "2 coca 2l" y nuevo "2 coca" => se ignora "2 coca".
+    const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
+
+    const existeVersionMasCompleta = actuales.some((actual) => {
+      const principalActual = obtenerProductoPrincipal(actual.producto);
+      return (
+        principalActual &&
+        principalNuevo &&
+        principalActual === principalNuevo &&
+        productoEsMasCompleto(actual.producto, nuevo.producto)
+      );
+    });
+
+    if (existeVersionMasCompleta) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 
