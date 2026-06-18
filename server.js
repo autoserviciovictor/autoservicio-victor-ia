@@ -68,24 +68,59 @@ function normalizarHorario(horario) {
 }
 
 function extraerHorarioTexto(texto) {
-  const t = normalizarTexto(texto);
+  const original = String(texto || "").trim();
+  const t = normalizarTexto(original);
   if (!t) return "";
 
+  // Primero respetamos horarios válidos claros: 12 / 17.
   const valido = normalizarHorario(t);
   if (valido) return valido;
 
-  const matchHora = t.match(/(?:a\s+las\s+)?\b(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs|h|horas)?\b/);
-  if (!matchHora) return "";
+  // Evita tomar cantidades o tamaños como horarios.
+  // Ejemplo anterior del error: "quiero 2 coca 2l ... 17" tomaba "02:00".
+  const lineas = original
+    .split(/\n|,|;/)
+    .map((l) => normalizarTexto(l))
+    .filter(Boolean);
 
-  const hora = Number(matchHora[1]);
-  const minutos = matchHora[2] ? Number(matchHora[2]) : 0;
+  function formatearHora(horaTxt, minutosTxt) {
+    const hora = Number(horaTxt);
+    const minutos = minutosTxt ? Number(minutosTxt) : 0;
 
-  if (!Number.isFinite(hora) || hora < 0 || hora > 23) return "";
-  if (!Number.isFinite(minutos) || minutos < 0 || minutos > 59) return "";
+    if (!Number.isFinite(hora) || hora < 0 || hora > 23) return "";
+    if (!Number.isFinite(minutos) || minutos < 0 || minutos > 59) return "";
 
-  return `${String(hora).padStart(2, "0")}:${String(minutos).padStart(2, "0")}`;
+    return `${String(hora).padStart(2, "0")}:${String(minutos).padStart(2, "0")}`;
+  }
+
+  // Caso: el cliente manda una línea sola: "17", "15", "15hs", "a las 15".
+  for (const linea of lineas) {
+    const horarioValidoLinea = normalizarHorario(linea);
+    if (horarioValidoLinea) return horarioValidoLinea;
+
+    const soloHorario = linea.match(/^(?:a\s+las\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs|h|horas)?$/);
+    if (soloHorario) {
+      const horario = formatearHora(soloHorario[1], soloHorario[2]);
+      if (horario) return horario;
+    }
+  }
+
+  // Caso: dentro de una frase: "entregalo a las 15hs" o "para las 15".
+  const conContexto = t.match(/(?:a\s+las|para\s+las|entrega\s+a\s+las|llevalo\s+a\s+las|lo\s+quiero\s+a\s+las)\s+(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs|h|horas)?\b/);
+  if (conContexto) {
+    const horario = formatearHora(conContexto[1], conContexto[2]);
+    if (horario) return horario;
+  }
+
+  // Caso: "15hs" en una frase, pero no "2l", "2 kg", etc.
+  const conHs = t.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs|h|horas)\b/);
+  if (conHs) {
+    const horario = formatearHora(conHs[1], conHs[2]);
+    if (horario) return horario;
+  }
+
+  return "";
 }
-
 function esMensajeSoloHorario(texto) {
   const t = normalizarTexto(texto);
   if (!t) return false;
@@ -445,9 +480,15 @@ function completarProductosDesdeTextoYPedido(texto, pedidoAnterior, productosBus
 
 function combinarPedido(anterior, nuevo) {
   const productosNuevos = nuevo.productos_buscados || [];
-  const horarioDetectado = nuevo.horario_solicitado || nuevo.horario_entrega || "";
-  const horarioNormalizado = normalizarHorario(horarioDetectado);
-  const horarioSolicitado = extraerHorarioTexto(horarioDetectado);
+
+  // Prioridad:
+  // 1) Si OpenAI ya devolvió un horario válido (12:00 o 17:00), usamos ese.
+  // 2) Si no, usamos el horario detectado del texto del cliente.
+  // Esto evita que una cantidad como "2 coca" se interprete como "02:00".
+  const horarioEntregaIA = nuevo.horario_entrega || "";
+  const horarioTextoCliente = nuevo.horario_solicitado || "";
+  const horarioNormalizado = normalizarHorario(horarioEntregaIA) || normalizarHorario(horarioTextoCliente);
+  const horarioSolicitado = horarioNormalizado ? "" : (extraerHorarioTexto(horarioEntregaIA) || extraerHorarioTexto(horarioTextoCliente));
 
   const esAclaracion =
     Array.isArray(anterior.dudas_productos) &&
