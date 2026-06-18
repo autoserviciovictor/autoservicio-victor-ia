@@ -381,6 +381,31 @@ function quitarProductosYaExistentes(productosActuales, productosNuevos) {
 }
 
 
+function hayAclaracionValidaDeProducto(productosActuales, productosNuevos) {
+  const actuales = productosStringAItems(productosActuales);
+  const nuevos = productosBuscadosAItems(productosNuevos);
+
+  if (actuales.length === 0 || nuevos.length === 0) return false;
+
+  return nuevos.some((nuevo) => {
+    const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
+
+    return actuales.some((actual) => {
+      const principalActual = obtenerProductoPrincipal(actual.producto);
+
+      if (!principalActual || !principalNuevo || principalActual !== principalNuevo) {
+        return false;
+      }
+
+      // Es aclaración válida solo si el producto nuevo aporta más detalle.
+      // Ejemplo válido: actual "coca" + nuevo "coca 2L".
+      // Ejemplo inválido: actual "coca 2L" + nuevo "coca".
+      return productoEsMasCompleto(nuevo.producto, actual.producto);
+    });
+  });
+}
+
+
 function cantidadDesdeTexto(texto) {
   const t = normalizarTexto(texto);
 
@@ -480,7 +505,19 @@ function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
       .map((nuevo, index) => ({ nuevo, index }))
       .filter(({ nuevo }) => {
         const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
-        return principalActual && principalNuevo && principalActual === principalNuevo;
+
+        if (!principalActual || !principalNuevo || principalActual !== principalNuevo) {
+          return false;
+        }
+
+        // Punto clave del bug:
+        // si ya tenemos "coca 2L" y la IA vuelve a devolver "coca",
+        // NO se considera aclaración y NO puede reemplazar lo completo.
+        if (productoEsMasCompleto(actual.producto, nuevo.producto)) {
+          return false;
+        }
+
+        return true;
       });
 
     if (relacionados.length === 0) {
@@ -525,11 +562,12 @@ function combinarPedido(anterior, nuevo) {
   const esAclaracion =
     Array.isArray(anterior.dudas_productos) &&
     anterior.dudas_productos.length > 0 &&
-    productosNuevos.length > 0;
+    hayAclaracionValidaDeProducto(anterior.productos || "", productosNuevos);
 
-  // Si ya hay pedido abierto y la IA vuelve a devolver los mismos productos anteriores
-  // mientras el cliente solo está completando datos u horarios, no los sumamos otra vez.
-  if (!esAclaracion && anterior.productos) {
+  // Si ya existe una versión más específica del producto, se ignora la versión simple
+  // aunque la IA la vuelva a mandar junto con datos personales, pago u horario.
+  // Ejemplo: actual "2 coca 2L" + nuevo "2 coca" => se conserva "2 coca 2L".
+  if (anterior.productos) {
     productosNuevos = quitarProductosYaExistentes(anterior.productos, productosNuevos);
   }
 
