@@ -67,6 +67,30 @@ function normalizarHorario(horario) {
   return "";
 }
 
+
+function extraerHorarioPedido(texto) {
+  const t = normalizarTexto(texto);
+  if (!t) return { encontrado: false, valido: false, horario: "", original: "" };
+
+  const valido = normalizarHorario(t);
+  if (valido) {
+    return { encontrado: true, valido: true, horario: valido, original: valido };
+  }
+
+  const match = t.match(/\b(\d{1,2})(?:[:.]?(\d{2}))?\s*(hs|h)?\b/);
+  if (!match) return { encontrado: false, valido: false, horario: "", original: "" };
+
+  const hora = Number(match[1]);
+  const minutos = match[2] ? Number(match[2]) : 0;
+
+  if (!Number.isFinite(hora) || hora < 0 || hora > 23) {
+    return { encontrado: false, valido: false, horario: "", original: "" };
+  }
+
+  const horario = `${String(hora).padStart(2, "0")}:${String(minutos || 0).padStart(2, "0")}`;
+  return { encontrado: true, valido: false, horario, original: match[0] };
+}
+
 function normalizarPago(pago) {
   const p = normalizarTexto(pago);
 
@@ -96,7 +120,10 @@ function calcularDatosFaltantes(pedido) {
   if (!pedido.cliente) faltantes.push("nombre");
   if (!pedido.direccion) faltantes.push("dirección");
   if (!pedido.pago) faltantes.push("forma de pago");
-  if (!pedido.horario_entrega) {
+
+  // Si el cliente pasó un horario inválido por primera vez, no lo marcamos
+  // como faltante común. Primero le preguntamos si puede ser 12:00 o 17:00.
+  if (!pedido.horario_entrega && !pedido.horario_invalido_pendiente) {
     faltantes.push("horario de entrega (12:00 o 17:00)");
   }
 
@@ -311,6 +338,23 @@ function mensajeEsSoloDatoComplementario(texto) {
   return false;
 }
 
+
+function mensajeTieneDatosSinProductos(texto) {
+  const t = normalizarTexto(texto);
+  if (!t) return false;
+
+  const palabrasDePedido = ["quiero", "agrega", "agregar", "tambien", "también", "sumame", "mandame", "llevo", "necesito"];
+  if (palabrasDePedido.some((p) => t.includes(p))) return false;
+  if (textoContieneProductoClaro(t)) return false;
+
+  const tienePago = Boolean(normalizarPago(t));
+  const tieneHorario = extraerHorarioPedido(t).encontrado;
+  const tieneDireccionProbable = /\d/.test(t) && /(calle|avenida|av|san|roca|ruta|barrio|juan|peron|sarmiento|mitre|belgrano|independencia|argentina)/.test(t);
+  const tieneComas = String(texto || "").includes(",");
+
+  return tienePago || tieneHorario || tieneDireccionProbable || tieneComas;
+}
+
 function claveProducto(item) {
   return `${Number(item.cantidad || 1)}|${normalizarTexto(item.producto)}`;
 }
@@ -377,31 +421,6 @@ function quitarProductosYaExistentes(productosActuales, productosNuevos) {
     }
 
     return true;
-  });
-}
-
-
-function hayAclaracionValidaDeProducto(productosActuales, productosNuevos) {
-  const actuales = productosStringAItems(productosActuales);
-  const nuevos = productosBuscadosAItems(productosNuevos);
-
-  if (actuales.length === 0 || nuevos.length === 0) return false;
-
-  return nuevos.some((nuevo) => {
-    const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
-
-    return actuales.some((actual) => {
-      const principalActual = obtenerProductoPrincipal(actual.producto);
-
-      if (!principalActual || !principalNuevo || principalActual !== principalNuevo) {
-        return false;
-      }
-
-      // Es aclaración válida solo si el producto nuevo aporta más detalle.
-      // Ejemplo válido: actual "coca" + nuevo "coca 2L".
-      // Ejemplo inválido: actual "coca 2L" + nuevo "coca".
-      return productoEsMasCompleto(nuevo.producto, actual.producto);
-    });
   });
 }
 
@@ -505,19 +524,7 @@ function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
       .map((nuevo, index) => ({ nuevo, index }))
       .filter(({ nuevo }) => {
         const principalNuevo = obtenerProductoPrincipal(nuevo.producto);
-
-        if (!principalActual || !principalNuevo || principalActual !== principalNuevo) {
-          return false;
-        }
-
-        // Punto clave del bug:
-        // si ya tenemos "coca 2L" y la IA vuelve a devolver "coca",
-        // NO se considera aclaración y NO puede reemplazar lo completo.
-        if (productoEsMasCompleto(actual.producto, nuevo.producto)) {
-          return false;
-        }
-
-        return true;
+        return principalActual && principalNuevo && principalActual === principalNuevo;
       });
 
     if (relacionados.length === 0) {
@@ -556,19 +563,52 @@ function fusionarProductos(productosActuales, productosNuevos, esAclaracion) {
 function combinarPedido(anterior, nuevo) {
   let productosNuevos = nuevo.productos_buscados || [];
 
+  const horarioDetectado = nuevo.horario_detectado || { encontrado: false, valido: false, horario: "" };
   const horarioNuevoNormalizado = normalizarHorario(nuevo.horario_entrega || "");
   const pagoNuevoNormalizado = normalizarPago(nuevo.pago || "");
+
+  const nuevosItems = productosBuscadosAItems(productosNuevos);
 
   const esAclaracion =
     Array.isArray(anterior.dudas_productos) &&
     anterior.dudas_productos.length > 0 &&
-    hayAclaracionValidaDeProducto(anterior.productos || "", productosNuevos);
+    nuevosItems.length > 0 &&
+    nuevosItems.some((nuevoItem) =>
+      productosStringAItems(anterior.productos || "").some((actualItem) => {
+        const principalActual = obtenerProductoPrincipal(actualItem.producto);
+        const principalNuevo = obtenerProductoPrincipal(nuevoItem.producto);
+        return (
+          principalActual &&
+          principalNuevo &&
+          principalActual === principalNuevo &&
+          productoEsMasCompleto(nuevoItem.producto, actualItem.producto)
+        );
+      })
+    );
 
-  // Si ya existe una versión más específica del producto, se ignora la versión simple
-  // aunque la IA la vuelva a mandar junto con datos personales, pago u horario.
-  // Ejemplo: actual "2 coca 2L" + nuevo "2 coca" => se conserva "2 coca 2L".
-  if (anterior.productos) {
+  if (!esAclaracion && anterior.productos) {
     productosNuevos = quitarProductosYaExistentes(anterior.productos, productosNuevos);
+  }
+
+  let horarioEntrega = anterior.horario_entrega || "";
+  let horarioInvalidoPendiente = anterior.horario_invalido_pendiente || "";
+  let horarioEspecial = Boolean(anterior.horario_especial);
+
+  if (horarioNuevoNormalizado) {
+    horarioEntrega = horarioNuevoNormalizado;
+    horarioInvalidoPendiente = "";
+    horarioEspecial = false;
+  } else if (horarioDetectado.encontrado && !horarioDetectado.valido) {
+    if (horarioInvalidoPendiente) {
+      // Segunda vez que insiste con un horario fuera de 12:00/17:00:
+      // lo guardamos, pero queda sujeto a confirmación del negocio.
+      horarioEntrega = horarioDetectado.horario;
+      horarioInvalidoPendiente = "";
+      horarioEspecial = true;
+    } else if (!horarioEntrega) {
+      // Primera vez que pide horario inválido: preguntamos 12:00 o 17:00.
+      horarioInvalidoPendiente = horarioDetectado.horario;
+    }
   }
 
   return {
@@ -580,11 +620,13 @@ function combinarPedido(anterior, nuevo) {
       productosNuevos,
       esAclaracion
     ),
-    horario_entrega: horarioNuevoNormalizado || anterior.horario_entrega || "",
+    horario_entrega: horarioEntrega,
+    horario_invalido_pendiente: horarioInvalidoPendiente,
+    horario_especial: horarioEspecial,
     dudas_productos: filtrarDudasInnecesarias(
       nuevo.dudas_productos || [],
       anterior.productos || "",
-      nuevo.productos_buscados || []
+      productosNuevos || []
     ),
   };
 }
@@ -1086,33 +1128,51 @@ async function finalizarOSolicitarDatos(from, pedidoActual) {
 
   const faltantes = calcularDatosFaltantes(pedidoActual);
 
-  if (faltantes.length === 0) {
-    await guardarPedido({
-      cliente: pedidoActual.cliente,
-      telefono: from,
-      productos: pedidoActual.productos,
-      direccion: pedidoActual.direccion,
-      pago: pedidoActual.pago,
-      horario_entrega: pedidoActual.horario_entrega,
-      estado: "Incompleto",
-    });
-
-    delete pedidosEnCurso[from];
+  if (faltantes.length > 0) {
+    pedidosEnCurso[from] = pedidoActual;
 
     await enviarWhatsApp(
       from,
-      "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
+      `Gracias. Para completar el pedido, pasame: ${faltantes.join(", ")}.`
     );
 
     return;
   }
 
-  pedidosEnCurso[from] = pedidoActual;
+  if (!pedidoActual.horario_entrega && pedidoActual.horario_invalido_pendiente) {
+    pedidosEnCurso[from] = pedidoActual;
 
-  await enviarWhatsApp(
-    from,
-    `Gracias. Para completar el pedido, pasame: ${faltantes.join(", ")}.`
-  );
+    await enviarWhatsApp(
+      from,
+      "Ese horario queda fuera de los horarios habituales de entrega. ¿Querés que te lo llevemos a las 12:00 o a las 17:00?"
+    );
+
+    return;
+  }
+
+  await guardarPedido({
+    cliente: pedidoActual.cliente,
+    telefono: from,
+    productos: pedidoActual.productos,
+    direccion: pedidoActual.direccion,
+    pago: pedidoActual.pago,
+    horario_entrega: pedidoActual.horario_entrega,
+    estado: "Incompleto",
+  });
+
+  delete pedidosEnCurso[from];
+
+  if (pedidoActual.horario_especial) {
+    await enviarWhatsApp(
+      from,
+      `Perfecto, tu pedido quedó registrado. Guardamos el horario solicitado (${pedidoActual.horario_entrega}), pero queda sujeto a confirmación según disponibilidad para hacer el envío a esa hora.`
+    );
+  } else {
+    await enviarWhatsApp(
+      from,
+      "Perfecto, tu pedido quedó registrado. Un vendedor confirmará disponibilidad y precio final."
+    );
+  }
 }
 
 app.get("/", (req, res) => {
@@ -1158,6 +1218,8 @@ app.post("/webhook", async (req, res) => {
       pago: "",
       productos: "",
       horario_entrega: "",
+      horario_invalido_pendiente: "",
+      horario_especial: false,
       dudas_productos: [],
     };
 
@@ -1236,12 +1298,12 @@ Reglas para datos:
 - Si completa datos personales, extraé cliente, dirección, pago y horario.
 - Si el mensaje nuevo es solo un dato faltante del pedido anterior, interpretalo como continuación del pedido.
 - Si existe pedido anterior y el mensaje nuevo es solo "12", "12hs", "17" o "17hs", cargalo como horario_entrega.
-- El único horario_entrega válido es "12:00" o "17:00".
+- Los horarios habituales de entrega son "12:00" o "17:00".
 - Si el cliente dice 11, 11hs, 13, 14, 15, 16, 18 u otro horario distinto a 12 o 17, dejá horario_entrega = "".
 - Si dice 12hs, 12 o mediodía: horario_entrega = "12:00".
 - Si dice 17hs, 17, 5 de la tarde: horario_entrega = "17:00".
 - Si dice cualquier otro horario distinto, dejá horario_entrega = "".
-- El negocio solo entrega a las 12:00 o 17:00.
+- Si insiste con otro horario, el sistema lo guardará localmente y quedará sujeto a confirmación.
 - Forma de pago válida solo puede ser: efectivo, tarjeta, transferencia o Mercado Pago.
 - Si el cliente escribe "agua", "coca", "leche" u otro producto, NO lo pongas como pago.
 - Si el cliente solo pasa nombre, dirección, pago u horario, productos_buscados debe ser [].
@@ -1274,17 +1336,35 @@ Reglas para datos:
 
     console.log("Datos extraídos:", data);
 
+    const horarioDetectado = extraerHorarioPedido(text);
+
     let productosBuscados = completarProductosPendientesDesdeDudas(
       text,
       data.dudas_productos || [],
       data.productos_buscados || []
     );
 
-    // Si hay un pedido abierto y el cliente solo está completando un dato
-    // (por ejemplo: "12", "15", "efectivo", "agustin"), no volvemos a sumar
-    // productos que la IA pueda repetir desde el pedido anterior.
-    if (pedidosEnCurso[from] && mensajeEsSoloDatoComplementario(text)) {
+    // Si hay un pedido abierto y el cliente solo está completando datos
+    // (nombre, dirección, pago u horario), NO confiamos en productos_buscados
+    // ni en dudas_productos que OpenAI pueda repetir desde el pedido anterior.
+    // Esto evita volver de "coca 2L" a "coca" y repetir la duda de tamaño.
+    const mensajeSoloDatosComplementarios =
+      pedidosEnCurso[from] &&
+      (mensajeEsSoloDatoComplementario(text) || mensajeTieneDatosSinProductos(text));
+
+    if (mensajeSoloDatosComplementarios) {
       productosBuscados = [];
+      data.dudas_productos = [];
+
+      // Refuerzo local: si OpenAI no cargó horario/pago, lo sacamos del texto.
+      // Ejemplo: "agustin, san juan 456, efectivo, 12hs".
+      if (!data.horario_entrega) {
+        data.horario_entrega = normalizarHorario(text);
+      }
+
+      if (!data.pago) {
+        data.pago = normalizarPago(text);
+      }
     }
 
     const tieneDatosPedido =
@@ -1302,11 +1382,14 @@ Reglas para datos:
         direccion: data.direccion,
         pago: data.pago,
         horario_entrega: data.horario_entrega,
+        horario_detectado: horarioDetectado,
         productos_buscados: productosBuscados,
         dudas_productos: data.dudas_productos || [],
       });
 
       pedidosEnCurso[from] = pedidoActual;
+
+      console.log("Pedido combinado:", pedidoActual);
 
       await finalizarOSolicitarDatos(from, pedidoActual);
 
