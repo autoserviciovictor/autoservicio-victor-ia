@@ -395,13 +395,14 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
   const pago = buscarValorPorEtiqueta(filasOriginales, "pago");
 
   const productos = extraerProductosDeFilas(filasOriginales);
-  const inicioProductos = 11;
+  const inicioProductos = 12;
   const cantidadFilasProductos = Math.max(productos.length, 5);
   const filaFirmas = inicioProductos + cantidadFilasProductos + 3;
 
   const valores = [
     [titulo, "", "", ""],
     [numeroPedido, "", "", ""],
+    ["────────────────────────────────────────", "", "", ""],
     ["", "", "", ""],
     ["DATOS DEL CLIENTE", "", "DATOS DEL PEDIDO", ""],
     ["Cliente:", cliente, "Horario de entrega:", entrega],
@@ -442,8 +443,6 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
       values: valores,
     },
   });
-
-  const totalFilas = valores.length;
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -489,8 +488,20 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           mergeCells: {
             range: {
               sheetId,
-              startRowIndex: 3,
-              endRowIndex: 4,
+              startRowIndex: 2,
+              endRowIndex: 3,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+        {
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 4,
+              endRowIndex: 5,
               startColumnIndex: 0,
               endColumnIndex: 2,
             },
@@ -501,8 +512,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           mergeCells: {
             range: {
               sheetId,
-              startRowIndex: 3,
-              endRowIndex: 4,
+              startRowIndex: 4,
+              endRowIndex: 5,
               startColumnIndex: 2,
               endColumnIndex: 4,
             },
@@ -513,8 +524,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           mergeCells: {
             range: {
               sheetId,
-              startRowIndex: 6,
-              endRowIndex: 7,
+              startRowIndex: 7,
+              endRowIndex: 8,
               startColumnIndex: 1,
               endColumnIndex: 2,
             },
@@ -525,8 +536,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           mergeCells: {
             range: {
               sheetId,
-              startRowIndex: 9,
-              endRowIndex: 10,
+              startRowIndex: 10,
+              endRowIndex: 11,
               startColumnIndex: 1,
               endColumnIndex: 4,
             },
@@ -552,7 +563,7 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
             range: {
               sheetId,
               startRowIndex: 0,
-              endRowIndex: 2,
+              endRowIndex: 1,
               startColumnIndex: 0,
               endColumnIndex: 4,
             },
@@ -562,7 +573,7 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
                 verticalAlignment: "MIDDLE",
                 textFormat: {
                   bold: true,
-                  fontSize: 18,
+                  fontSize: 15,
                   foregroundColor: colorHex("#111111"),
                 },
               },
@@ -576,8 +587,57 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 3,
-              endRowIndex: 4,
+              startRowIndex: 1,
+              endRowIndex: 2,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+                textFormat: {
+                  bold: true,
+                  fontSize: 14,
+                  foregroundColor: colorHex("#111111"),
+                },
+              },
+            },
+            fields:
+              "userEnteredFormat(horizontalAlignment,verticalAlignment,textFormat)",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 2,
+              endRowIndex: 3,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+                textFormat: {
+                  fontSize: 9,
+                  foregroundColor: colorHex("#999999"),
+                },
+              },
+            },
+            fields:
+              "userEnteredFormat(horizontalAlignment,verticalAlignment,textFormat)",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 4,
+              endRowIndex: 5,
               startColumnIndex: 0,
               endColumnIndex: 4,
             },
@@ -601,8 +661,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 4,
-              endRowIndex: 8,
+              startRowIndex: 5,
+              endRowIndex: 9,
               startColumnIndex: 0,
               endColumnIndex: 4,
             },
@@ -627,8 +687,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 4,
-              endRowIndex: 8,
+              startRowIndex: 5,
+              endRowIndex: 9,
               startColumnIndex: 0,
               endColumnIndex: 1,
             },
@@ -642,8 +702,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 4,
-              endRowIndex: 8,
+              startRowIndex: 5,
+              endRowIndex: 9,
               startColumnIndex: 2,
               endColumnIndex: 3,
             },
@@ -658,8 +718,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 9,
-              endRowIndex: 10,
+              startRowIndex: 10,
+              endRowIndex: 11,
               startColumnIndex: 0,
               endColumnIndex: 4,
             },
@@ -683,8 +743,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 10,
-              endRowIndex: 10 + cantidadFilasProductos,
+              startRowIndex: 11,
+              endRowIndex: 11 + cantidadFilasProductos,
               startColumnIndex: 0,
               endColumnIndex: 1,
             },
@@ -702,8 +762,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 10,
-              endRowIndex: 10 + cantidadFilasProductos,
+              startRowIndex: 11,
+              endRowIndex: 11 + cantidadFilasProductos,
               startColumnIndex: 1,
               endColumnIndex: 4,
             },
@@ -760,8 +820,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           updateBorders: {
             range: {
               sheetId,
-              startRowIndex: 3,
-              endRowIndex: 8,
+              startRowIndex: 4,
+              endRowIndex: 9,
               startColumnIndex: 0,
               endColumnIndex: 4,
             },
@@ -778,8 +838,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           updateBorders: {
             range: {
               sheetId,
-              startRowIndex: 9,
-              endRowIndex: 10 + cantidadFilasProductos,
+              startRowIndex: 10,
+              endRowIndex: 11 + cantidadFilasProductos,
               startColumnIndex: 0,
               endColumnIndex: 4,
             },
@@ -815,11 +875,12 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 4 }, properties: { pixelSize: 170 }, fields: "pixelSize" } },
 
-        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 38 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 34 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 3, endIndex: 4 }, properties: { pixelSize: 28 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 9, endIndex: 10 }, properties: { pixelSize: 30 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 10, endIndex: 10 + cantidadFilasProductos }, properties: { pixelSize: 28 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 30 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 30 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 20 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 4, endIndex: 5 }, properties: { pixelSize: 28 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 10, endIndex: 11 }, properties: { pixelSize: 30 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 11, endIndex: 11 + cantidadFilasProductos }, properties: { pixelSize: 28 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: filaFirmas - 1, endIndex: filaFirmas + 1 }, properties: { pixelSize: 42 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: filaFirmas + 1, endIndex: filaFirmas + 3 }, properties: { pixelSize: 30 }, fields: "pixelSize" } },
       ],
