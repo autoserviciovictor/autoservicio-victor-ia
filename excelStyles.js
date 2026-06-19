@@ -1,22 +1,35 @@
-const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
+function colorHex(hex) {
+  const limpio = hex.replace("#", "");
+  const r = parseInt(limpio.substring(0, 2), 16) / 255;
+  const g = parseInt(limpio.substring(2, 4), 16) / 255;
+  const b = parseInt(limpio.substring(4, 6), 16) / 255;
+  return { red: r, green: g, blue: b };
+}
 
-async function formatearHojaPrincipal(sheets) {
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: GOOGLE_SHEET_ID,
-  });
+function obtenerSpreadsheetId(spreadsheetId) {
+  return spreadsheetId || process.env.GOOGLE_SHEET_ID;
+}
+
+async function obtenerSheetIdPorTitulo(sheets, spreadsheetId, titulo) {
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
 
   const hoja = (spreadsheet.data.sheets || []).find(
-    (s) => s.properties.title === "Hoja 1"
+    (s) => s.properties.title === titulo
   );
 
   if (!hoja) {
-    throw new Error("No se encontró la hoja principal: Hoja 1");
+    throw new Error(`No se encontró la hoja: ${titulo}`);
   }
 
-  const sheetId = hoja.properties.sheetId;
+  return hoja.properties.sheetId;
+}
+
+async function formatearHojaPrincipal(sheets, spreadsheetIdParam) {
+  const spreadsheetId = obtenerSpreadsheetId(spreadsheetIdParam);
+  const sheetId = await obtenerSheetIdPorTitulo(sheets, spreadsheetId, "Hoja 1");
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: GOOGLE_SHEET_ID,
+    spreadsheetId,
     requestBody: {
       requests: [
         {
@@ -28,6 +41,23 @@ async function formatearHojaPrincipal(sheets) {
             fields: "gridProperties.frozenRowCount",
           },
         },
+
+        {
+          clearBasicFilter: { sheetId },
+        },
+        {
+          setBasicFilter: {
+            filter: {
+              range: {
+                sheetId,
+                startRowIndex: 0,
+                startColumnIndex: 0,
+                endColumnIndex: 10,
+              },
+            },
+          },
+        },
+
         {
           repeatCell: {
             range: {
@@ -39,15 +69,20 @@ async function formatearHojaPrincipal(sheets) {
             },
             cell: {
               userEnteredFormat: {
-                backgroundColor: { red: 0.85, green: 0.92, blue: 1 },
-                textFormat: { bold: true },
+                backgroundColor: colorHex("#B71C1C"),
+                textFormat: {
+                  bold: true,
+                  foregroundColor: colorHex("#FFFFFF"),
+                },
                 horizontalAlignment: "CENTER",
                 verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+            fields:
+              "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
           },
         },
+
         {
           repeatCell: {
             range: {
@@ -65,12 +100,43 @@ async function formatearHojaPrincipal(sheets) {
             fields: "userEnteredFormat(verticalAlignment,wrapStrategy)",
           },
         },
+
         {
           repeatCell: {
             range: {
               sheetId,
               startRowIndex: 1,
               startColumnIndex: 0,
+              endColumnIndex: 2,
+            },
+            cell: {
+              userEnteredFormat: { horizontalAlignment: "CENTER" },
+            },
+            fields: "userEnteredFormat.horizontalAlignment",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              startColumnIndex: 2,
+              endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: { horizontalAlignment: "LEFT" },
+            },
+            fields: "userEnteredFormat.horizontalAlignment",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              startColumnIndex: 3,
               endColumnIndex: 5,
             },
             cell: {
@@ -79,13 +145,14 @@ async function formatearHojaPrincipal(sheets) {
             fields: "userEnteredFormat.horizontalAlignment",
           },
         },
+
         {
           repeatCell: {
             range: {
               sheetId,
               startRowIndex: 1,
               startColumnIndex: 5,
-              endColumnIndex: 8,
+              endColumnIndex: 6,
             },
             cell: {
               userEnteredFormat: { horizontalAlignment: "LEFT" },
@@ -93,12 +160,13 @@ async function formatearHojaPrincipal(sheets) {
             fields: "userEnteredFormat.horizontalAlignment",
           },
         },
+
         {
           repeatCell: {
             range: {
               sheetId,
               startRowIndex: 1,
-              startColumnIndex: 8,
+              startColumnIndex: 6,
               endColumnIndex: 10,
             },
             cell: {
@@ -107,39 +175,124 @@ async function formatearHojaPrincipal(sheets) {
             fields: "userEnteredFormat.horizontalAlignment",
           },
         },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 180 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 105 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 4 }, properties: { pixelSize: 145 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 4, endIndex: 5 }, properties: { pixelSize: 135 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 5, endIndex: 6 }, properties: { pixelSize: 210 }, fields: "pixelSize" } },
+
+        {
+          addConditionalFormatRule: {
+            rule: {
+              ranges: [
+                {
+                  sheetId,
+                  startRowIndex: 1,
+                  startColumnIndex: 8,
+                  endColumnIndex: 9,
+                },
+              ],
+              booleanRule: {
+                condition: {
+                  type: "TEXT_EQ",
+                  values: [{ userEnteredValue: "Incompleto" }],
+                },
+                format: {
+                  backgroundColor: colorHex("#FCE4D6"),
+                  textFormat: {
+                    bold: true,
+                    foregroundColor: colorHex("#7F3B00"),
+                  },
+                },
+              },
+            },
+            index: 0,
+          },
+        },
+
+        {
+          addConditionalFormatRule: {
+            rule: {
+              ranges: [
+                {
+                  sheetId,
+                  startRowIndex: 1,
+                  startColumnIndex: 8,
+                  endColumnIndex: 9,
+                },
+              ],
+              booleanRule: {
+                condition: {
+                  type: "TEXT_EQ",
+                  values: [{ userEnteredValue: "Completo" }],
+                },
+                format: {
+                  backgroundColor: colorHex("#D9EAD3"),
+                  textFormat: {
+                    bold: true,
+                    foregroundColor: colorHex("#274E13"),
+                  },
+                },
+              },
+            },
+            index: 1,
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              startColumnIndex: 9,
+              endColumnIndex: 10,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: {
+                  foregroundColor: colorHex("#1155CC"),
+                  underline: true,
+                },
+                horizontalAlignment: "CENTER",
+              },
+            },
+            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+          },
+        },
+
+        {
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              startColumnIndex: 0,
+              endColumnIndex: 10,
+            },
+            top: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            bottom: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            left: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            right: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+          },
+        },
+
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 120 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 90 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 180 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 4 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 4, endIndex: 5 }, properties: { pixelSize: 120 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 5, endIndex: 6 }, properties: { pixelSize: 260 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 6, endIndex: 7 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 7, endIndex: 8 }, properties: { pixelSize: 145 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 8, endIndex: 9 }, properties: { pixelSize: 130 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 7, endIndex: 8 }, properties: { pixelSize: 140 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 8, endIndex: 9 }, properties: { pixelSize: 140 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 9, endIndex: 10 }, properties: { pixelSize: 130 }, fields: "pixelSize" } },
       ],
     },
   });
 }
 
-
-async function aplicarDesplegableEstado(sheets) {
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: GOOGLE_SHEET_ID,
-  });
-
-  const hoja = (spreadsheet.data.sheets || []).find(
-    (s) => s.properties.title === "Hoja 1"
-  );
-
-  if (!hoja) {
-    throw new Error("No se encontró la hoja principal: Hoja 1");
-  }
-
-  const sheetId = hoja.properties.sheetId;
+async function aplicarDesplegableEstado(sheets, spreadsheetIdParam) {
+  const spreadsheetId = obtenerSpreadsheetId(spreadsheetIdParam);
+  const sheetId = await obtenerSheetIdPorTitulo(sheets, spreadsheetId, "Hoja 1");
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: GOOGLE_SHEET_ID,
+    spreadsheetId,
     requestBody: {
       requests: [
         {
@@ -168,10 +321,20 @@ async function aplicarDesplegableEstado(sheets) {
   });
 }
 
+async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
+  let spreadsheetId;
+  let sheetId;
 
-async function formatearHojaPedidoImprimible(sheets, sheetId) {
+  if (arg2 === undefined) {
+    spreadsheetId = process.env.GOOGLE_SHEET_ID;
+    sheetId = arg1;
+  } else {
+    spreadsheetId = arg1;
+    sheetId = arg2;
+  }
+
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: GOOGLE_SHEET_ID,
+    spreadsheetId,
     requestBody: {
       requests: [
         {
@@ -198,6 +361,7 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             mergeType: "MERGE_ALL",
           },
         },
+
         {
           repeatCell: {
             range: {
@@ -209,13 +373,56 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             },
             cell: {
               userEnteredFormat: {
-                textFormat: { bold: true, fontSize: 16 },
                 horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+                textFormat: {
+                  bold: true,
+                  fontSize: 16,
+                  foregroundColor: colorHex("#111111"),
+                },
+              },
+            },
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment,textFormat)",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 10,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                horizontalAlignment: "LEFT",
               },
             },
             fields: "userEnteredFormat(textFormat,horizontalAlignment)",
           },
         },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 10,
+              startColumnIndex: 1,
+              endColumnIndex: 2,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "LEFT",
+              },
+            },
+            fields: "userEnteredFormat.horizontalAlignment",
+          },
+        },
+
         {
           repeatCell: {
             range: {
@@ -227,43 +434,38 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
             },
             cell: {
               userEnteredFormat: {
-                textFormat: { bold: true },
+                backgroundColor: colorHex("#B71C1C"),
+                textFormat: {
+                  bold: true,
+                  foregroundColor: colorHex("#FFFFFF"),
+                },
                 horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+            fields:
+              "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
           },
         },
+
         {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 3,
-              endRowIndex: 10,
+              startRowIndex: 12,
               startColumnIndex: 0,
               endColumnIndex: 1,
             },
             cell: {
-              userEnteredFormat: { textFormat: { bold: true } },
+              userEnteredFormat: {
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+              },
             },
-            fields: "userEnteredFormat.textFormat",
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
           },
         },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 3,
-              endRowIndex: 10,
-              startColumnIndex: 1,
-              endColumnIndex: 2,
-            },
-            cell: {
-              userEnteredFormat: { horizontalAlignment: "RIGHT" },
-            },
-            fields: "userEnteredFormat.horizontalAlignment",
-          },
-        },
+
         {
           repeatCell: {
             range: {
@@ -273,11 +475,15 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               endColumnIndex: 2,
             },
             cell: {
-              userEnteredFormat: { horizontalAlignment: "RIGHT" },
+              userEnteredFormat: {
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+              },
             },
-            fields: "userEnteredFormat.horizontalAlignment",
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
           },
         },
+
         {
           repeatCell: {
             range: {
@@ -287,43 +493,67 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
               endColumnIndex: 3,
             },
             cell: {
-              userEnteredFormat: { horizontalAlignment: "LEFT" },
+              userEnteredFormat: {
+                horizontalAlignment: "LEFT",
+                verticalAlignment: "MIDDLE",
+              },
             },
-            fields: "userEnteredFormat.horizontalAlignment",
+            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
           },
         },
+
         {
-          updateDimensionProperties: {
+          updateBorders: {
             range: {
               sheetId,
-              dimension: "COLUMNS",
-              startIndex: 0,
-              endIndex: 1,
+              startRowIndex: 3,
+              endRowIndex: 10,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
             },
-            properties: { pixelSize: 140 },
+            top: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            bottom: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            left: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            right: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+          },
+        },
+
+        {
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: 11,
+              startColumnIndex: 0,
+              endColumnIndex: 3,
+            },
+            top: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            bottom: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            left: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            right: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+          },
+        },
+
+        {
+          updateDimensionProperties: {
+            range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 },
+            properties: { pixelSize: 90 },
             fields: "pixelSize",
           },
         },
         {
           updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: "COLUMNS",
-              startIndex: 1,
-              endIndex: 2,
-            },
-            properties: { pixelSize: 180 },
+            range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 },
+            properties: { pixelSize: 130 },
             fields: "pixelSize",
           },
         },
         {
           updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: "COLUMNS",
-              startIndex: 2,
-              endIndex: 3,
-            },
+            range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 },
             properties: { pixelSize: 430 },
             fields: "pixelSize",
           },
@@ -332,7 +562,6 @@ async function formatearHojaPedidoImprimible(sheets, sheetId) {
     },
   });
 }
-
 
 module.exports = {
   formatearHojaPrincipal,
