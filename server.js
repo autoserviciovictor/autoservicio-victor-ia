@@ -320,6 +320,174 @@ function limpiarProductoYCantidad(cantidad, producto) {
   };
 }
 
+function numeroPalabraAValor(valor) {
+  const t = normalizarTexto(valor);
+
+  const cantidades = {
+    un: 1,
+    una: 1,
+    uno: 1,
+    dos: 2,
+    tres: 3,
+    cuatro: 4,
+    cinco: 5,
+    seis: 6,
+    siete: 7,
+    ocho: 8,
+    nueve: 9,
+    diez: 10,
+  };
+
+  if (cantidades[t]) return cantidades[t];
+
+  const n = Number(String(valor).replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function limpiarTextoProductoDesdeMensaje(segmento) {
+  let texto = String(segmento || "").trim();
+
+  texto = texto
+    .replace(/^(quiero|necesito|pasame|mandame|agregame|sumame|me das|deme|dame)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Saca cantidades explícitas del final: "10 unidades", "x2", "x 2", "2 unidades".
+  texto = texto
+    .replace(/\b(?:x|por)\s*\d+\s*$/i, "")
+    .replace(/\b\d+\s*(unidades|unidad|u|uni|uds)\s*$/i, "")
+    .trim();
+
+  // Saca cantidad explícita al inicio solo si NO es peso/medida.
+  // "10 Lays 134 gm" => saca el 10.
+  // "10 kg asado" => NO saca el 10 porque es parte del peso.
+  texto = texto.replace(
+    /^(\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?!kg\b|kilo\b|kilos\b|gr\b|g\b|gm\b|l\b|lt\b|lts\b|litro\b|litros\b|ml\b|cc\b)/i,
+    ""
+  );
+
+  return texto.replace(/\s+/g, " ").trim();
+}
+
+function obtenerSegmentosMensajeProductos(texto) {
+  return String(texto || "")
+    .split(/\n|,|;|\sy\s(?=\d+\s|\w+)/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function extraerPesoOMedida(segmento) {
+  const texto = normalizarTexto(segmento);
+
+  const matches = [...texto.matchAll(/\b(\d+(?:[.,]\d+)?)\s*(kg|kilo|kilos|gr|g|gm|l|lt|lts|litro|litros|ml|cc)\b/g)];
+
+  if (matches.length === 0) return null;
+
+  const ultimo = matches[matches.length - 1];
+
+  return {
+    numero: Number(String(ultimo[1]).replace(",", ".")),
+    unidad: ultimo[2],
+    texto: `${ultimo[1]} ${ultimo[2]}`,
+  };
+}
+
+function extraerCantidadExplicita(segmento) {
+  const texto = normalizarTexto(segmento);
+
+  // "10 Lays 134 gm" => cantidad 10.
+  // "2 lechones 5kg" => cantidad 2.
+  // "10 kg asado" => NO es cantidad, es peso.
+  const inicio = texto.match(/^(\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?!kg\b|kilo\b|kilos\b|gr\b|g\b|gm\b|l\b|lt\b|lts\b|litro\b|litros\b|ml\b|cc\b)/i);
+  if (inicio) {
+    const valor = numeroPalabraAValor(inicio[1]);
+    if (valor > 0) return valor;
+  }
+
+  // "Lays 134 gm 10 unidades" => cantidad 10.
+  const unidades = texto.match(/\b(\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(unidades|unidad|u|uni|uds)\b/i);
+  if (unidades) {
+    const valor = numeroPalabraAValor(unidades[1]);
+    if (valor > 0) return valor;
+  }
+
+  // "coca 2l x2" o "coca 2l x 2" => cantidad 2.
+  const xDespues = texto.match(/\b(?:x|por)\s*(\d+)\b/i);
+  if (xDespues) {
+    const valor = Number(xDespues[1]);
+    if (Number.isFinite(valor) && valor > 0) return valor;
+  }
+
+  return 0;
+}
+
+function segmentoCoincideConProducto(segmento, producto) {
+  const seg = normalizarTexto(segmento);
+  const prod = normalizarTexto(producto);
+  const principal = obtenerProductoPrincipal(producto);
+
+  if (!seg || !prod) return false;
+  if (principal && seg.includes(principal)) return true;
+
+  const palabrasProducto = obtenerPalabrasClave(producto);
+  return palabrasProducto.some((p) => seg.includes(p));
+}
+
+function corregirProductosConTextoOriginal(textoOriginal, productosBuscados) {
+  if (!Array.isArray(productosBuscados) || productosBuscados.length === 0) {
+    return productosBuscados || [];
+  }
+
+  const segmentos = obtenerSegmentosMensajeProductos(textoOriginal);
+
+  return productosBuscados.map((item) => {
+    if (!item || !item.producto) return item;
+
+    const productoIA = String(item.producto || "").trim();
+    const cantidadIA = Number(item.cantidad || 1);
+
+    const segmento = segmentos.find((s) => segmentoCoincideConProducto(s, productoIA));
+
+    if (!segmento) {
+      return limpiarProductoYCantidad(cantidadIA, productoIA);
+    }
+
+    const pesoOMedida = extraerPesoOMedida(segmento);
+    const cantidadExplicita = extraerCantidadExplicita(segmento);
+
+    if (!pesoOMedida) {
+      return limpiarProductoYCantidad(cantidadIA, productoIA);
+    }
+
+    const productoLimpioDesdeMensaje = limpiarTextoProductoDesdeMensaje(segmento);
+
+    // Si hay peso/medida y NO hay cantidad explícita, el número de kg/gr/litros
+    // pertenece al producto, no a la cantidad.
+    //
+    // Ejemplos:
+    // "Asado 10 kg" => 1 | Asado 10 kg
+    // "Papa 3 kg" => 1 | Papa 3 kg
+    // "Lechón 5kg" => 1 | Lechón 5kg
+    //
+    // Si hay cantidad explícita, se respeta:
+    // "2 lechones 5kg" => 2 | lechones 5kg
+    // "10 Lays 134 gm" => 10 | Lays 134 gm
+    // "Lays 134 gm 10 unidades" => 10 | Lays 134 gm
+    if (cantidadExplicita > 0) {
+      return {
+        cantidad: cantidadExplicita,
+        producto: productoLimpioDesdeMensaje || productoIA,
+      };
+    }
+
+    return {
+      cantidad: 1,
+      producto: productoLimpioDesdeMensaje || productoIA,
+    };
+  });
+}
+
+
 function productosStringAItems(productos) {
   if (!productos) return [];
 
@@ -966,6 +1134,17 @@ Reglas para productos:
   azucar cantidad 1,
   dudas_productos ["¿De qué tamaño querés las cocas?"].
 - Convertí cantidades escritas en letras a números: una=1, un=1, dos=2, tres=3, cuatro=4, cinco=5.
+- Diferenciá siempre cantidad de peso/tamaño/presentación.
+- Cantidad = cuántas unidades pide el cliente.
+- Peso/tamaño/presentación queda dentro del nombre del producto.
+- Si el cliente dice "Asado 10 kg", devolvé cantidad 1 y producto "Asado 10 kg".
+- Si el cliente dice "Papa 3 kg", devolvé cantidad 1 y producto "Papa 3 kg".
+- Si el cliente dice "Lechón 5kg", devolvé cantidad 1 y producto "Lechón 5kg".
+- Si el cliente dice "2 lechones 5kg", devolvé cantidad 2 y producto "Lechones 5kg".
+- Si el cliente dice "10 Lays 134 gm", devolvé cantidad 10 y producto "Lays 134 gm".
+- Si el cliente dice "Lays 134 gm 10 unidades", devolvé cantidad 10 y producto "Lays 134 gm".
+- Si el cliente dice "2 coca 2L", devolvé cantidad 2 y producto "coca 2L".
+- Si el cliente dice "coca 2L x2", devolvé cantidad 2 y producto "coca 2L".
 - Si no dice cantidad y es un producto individual común, asumí 1.
 - Si realmente no queda clara la cantidad, preguntá.
 
@@ -1017,6 +1196,8 @@ Reglas para datos:
       data.productos_buscados || [],
       data.dudas_productos || []
     );
+
+    productosBuscados = corregirProductosConTextoOriginal(text, productosBuscados);
 
     let dudasProductos = data.dudas_productos || [];
 
