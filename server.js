@@ -757,6 +757,12 @@ async function guardarPedido({
     },
   });
 
+  // IMPORTANTE:
+  // Se vuelve a aplicar el formato DESPUÉS de guardar el pedido.
+  // Esto evita que Google Sheets copie el fondo rojo del encabezado
+  // a la nueva fila insertada.
+  await formatearHojaPrincipal(sheets);
+
   console.log(`Pedido guardado en Google Sheets: ${nombreHojaPedido}`);
 }
 async function enviarWhatsApp(to, body) {
