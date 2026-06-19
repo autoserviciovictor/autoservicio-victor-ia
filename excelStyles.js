@@ -10,7 +10,11 @@ function obtenerSpreadsheetId(spreadsheetId) {
   return spreadsheetId || process.env.GOOGLE_SHEET_ID;
 }
 
-async function obtenerSheetIdPorTitulo(sheets, spreadsheetId, titulo) {
+function escaparNombreHoja(titulo) {
+  return String(titulo).replace(/'/g, "''");
+}
+
+async function obtenerHojaPorTitulo(sheets, spreadsheetId, titulo) {
   const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
 
   const hoja = (spreadsheet.data.sheets || []).find(
@@ -21,12 +25,27 @@ async function obtenerSheetIdPorTitulo(sheets, spreadsheetId, titulo) {
     throw new Error(`No se encontró la hoja: ${titulo}`);
   }
 
-  return hoja.properties.sheetId;
+  return hoja.properties;
+}
+
+async function obtenerHojaPorId(sheets, spreadsheetId, sheetId) {
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+
+  const hoja = (spreadsheet.data.sheets || []).find(
+    (s) => s.properties.sheetId === sheetId
+  );
+
+  if (!hoja) {
+    throw new Error(`No se encontró la hoja con ID: ${sheetId}`);
+  }
+
+  return hoja.properties;
 }
 
 async function formatearHojaPrincipal(sheets, spreadsheetIdParam) {
   const spreadsheetId = obtenerSpreadsheetId(spreadsheetIdParam);
-  const sheetId = await obtenerSheetIdPorTitulo(sheets, spreadsheetId, "Hoja 1");
+  const hoja = await obtenerHojaPorTitulo(sheets, spreadsheetId, "Hoja 1");
+  const sheetId = hoja.sheetId;
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -39,22 +58,6 @@ async function formatearHojaPrincipal(sheets, spreadsheetIdParam) {
               gridProperties: { frozenRowCount: 1 },
             },
             fields: "gridProperties.frozenRowCount",
-          },
-        },
-
-        {
-          clearBasicFilter: { sheetId },
-        },
-        {
-          setBasicFilter: {
-            filter: {
-              range: {
-                sheetId,
-                startRowIndex: 0,
-                startColumnIndex: 0,
-                endColumnIndex: 10,
-              },
-            },
           },
         },
 
@@ -93,11 +96,17 @@ async function formatearHojaPrincipal(sheets, spreadsheetIdParam) {
             },
             cell: {
               userEnteredFormat: {
+                backgroundColor: colorHex("#FFFFFF"),
+                textFormat: {
+                  bold: false,
+                  foregroundColor: colorHex("#111111"),
+                },
                 verticalAlignment: "MIDDLE",
                 wrapStrategy: "WRAP",
               },
             },
-            fields: "userEnteredFormat(verticalAlignment,wrapStrategy)",
+            fields:
+              "userEnteredFormat(backgroundColor,textFormat,verticalAlignment,wrapStrategy)",
           },
         },
 
@@ -267,19 +276,19 @@ async function formatearHojaPrincipal(sheets, spreadsheetIdParam) {
             bottom: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
             left: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
             right: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
-            innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
-            innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#E6E6E6") },
+            innerVertical: { style: "SOLID", width: 1, color: colorHex("#E6E6E6") },
           },
         },
 
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 120 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 90 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 180 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 95 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 190 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 4 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 4, endIndex: 5 }, properties: { pixelSize: 120 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 5, endIndex: 6 }, properties: { pixelSize: 260 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 6, endIndex: 7 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
-        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 7, endIndex: 8 }, properties: { pixelSize: 140 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 4, endIndex: 5 }, properties: { pixelSize: 125 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 5, endIndex: 6 }, properties: { pixelSize: 270 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 6, endIndex: 7 }, properties: { pixelSize: 160 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 7, endIndex: 8 }, properties: { pixelSize: 145 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 8, endIndex: 9 }, properties: { pixelSize: 140 }, fields: "pixelSize" } },
         { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 9, endIndex: 10 }, properties: { pixelSize: 130 }, fields: "pixelSize" } },
       ],
@@ -289,7 +298,8 @@ async function formatearHojaPrincipal(sheets, spreadsheetIdParam) {
 
 async function aplicarDesplegableEstado(sheets, spreadsheetIdParam) {
   const spreadsheetId = obtenerSpreadsheetId(spreadsheetIdParam);
-  const sheetId = await obtenerSheetIdPorTitulo(sheets, spreadsheetId, "Hoja 1");
+  const hoja = await obtenerHojaPorTitulo(sheets, spreadsheetId, "Hoja 1");
+  const sheetId = hoja.sheetId;
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -321,6 +331,35 @@ async function aplicarDesplegableEstado(sheets, spreadsheetIdParam) {
   });
 }
 
+function buscarValorPorEtiqueta(filas, etiqueta) {
+  const etiquetaNormalizada = String(etiqueta).toLowerCase();
+
+  for (const fila of filas) {
+    const nombre = String(fila?.[0] || "").toLowerCase();
+    if (nombre.includes(etiquetaNormalizada)) {
+      return fila?.[1] || "";
+    }
+  }
+
+  return "";
+}
+
+function extraerProductosDeFilas(filas) {
+  const productos = [];
+
+  for (let i = 0; i < filas.length; i++) {
+    const fila = filas[i] || [];
+    const cantidad = fila[1];
+    const producto = fila[2];
+
+    if (producto && cantidad && String(producto).toLowerCase() !== "producto") {
+      productos.push([cantidad, producto]);
+    }
+  }
+
+  return productos;
+}
+
 async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
   let spreadsheetId;
   let sheetId;
@@ -333,10 +372,90 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
     sheetId = arg2;
   }
 
+  const hoja = await obtenerHojaPorId(sheets, spreadsheetId, sheetId);
+  const tituloHoja = hoja.title;
+  const tituloEscapado = escaparNombreHoja(tituloHoja);
+
+  const respuesta = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${tituloEscapado}'!A1:C60`,
+  });
+
+  const filasOriginales = respuesta.data.values || [];
+
+  const titulo = filasOriginales?.[0]?.[0] || "AUTOSERVICIO VICTOR";
+  const numeroPedido = filasOriginales?.[1]?.[0] || tituloHoja.replace("_", " #");
+
+  const fecha = buscarValorPorEtiqueta(filasOriginales, "fecha");
+  const hora = buscarValorPorEtiqueta(filasOriginales, "hora");
+  const cliente = buscarValorPorEtiqueta(filasOriginales, "cliente");
+  const telefono = buscarValorPorEtiqueta(filasOriginales, "teléfono") || buscarValorPorEtiqueta(filasOriginales, "telefono");
+  const direccion = buscarValorPorEtiqueta(filasOriginales, "dirección") || buscarValorPorEtiqueta(filasOriginales, "direccion");
+  const entrega = buscarValorPorEtiqueta(filasOriginales, "entrega");
+  const pago = buscarValorPorEtiqueta(filasOriginales, "pago");
+
+  const productos = extraerProductosDeFilas(filasOriginales);
+  const inicioProductos = 10;
+  const filaFirmas = inicioProductos + Math.max(productos.length, 1) + 3;
+
+  const valores = [
+    [titulo, "", "", ""],
+    [numeroPedido, "", "", ""],
+    ["", "", "", ""],
+    ["Cliente:", cliente, "Horario de entrega:", entrega],
+    ["Teléfono:", telefono, "Forma de pago:", pago],
+    ["Dirección:", direccion, "Fecha:", fecha],
+    ["", "", "Hora:", hora],
+    ["", "", "", ""],
+    ["Cantidad", "Producto", "", ""],
+  ];
+
+  if (productos.length === 0) {
+    valores.push(["", "", "", ""]);
+  } else {
+    for (const [cantidad, producto] of productos) {
+      valores.push([cantidad, producto, "", ""]);
+    }
+  }
+
+  valores.push(
+    ["", "", "", ""],
+    ["", "", "", ""],
+    ["Armó pedido", "Controló", "Entregó", "Recibió"],
+    ["", "", "", ""],
+    ["________________", "________________", "________________", "________________"]
+  );
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: `'${tituloEscapado}'!A1:Z80`,
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `'${tituloEscapado}'!A1:D${valores.length}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: valores,
+    },
+  });
+
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     requestBody: {
       requests: [
+        {
+          unmergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: 80,
+              startColumnIndex: 0,
+              endColumnIndex: 10,
+            },
+          },
+        },
+
         {
           mergeCells: {
             range: {
@@ -344,7 +463,7 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
               startRowIndex: 0,
               endRowIndex: 1,
               startColumnIndex: 0,
-              endColumnIndex: 3,
+              endColumnIndex: 4,
             },
             mergeType: "MERGE_ALL",
           },
@@ -356,11 +475,48 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
               startRowIndex: 1,
               endRowIndex: 2,
               startColumnIndex: 0,
-              endColumnIndex: 3,
+              endColumnIndex: 4,
             },
             mergeType: "MERGE_ALL",
           },
         },
+        {
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 5,
+              endRowIndex: 6,
+              startColumnIndex: 1,
+              endColumnIndex: 2,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+        {
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 8,
+              endRowIndex: 9,
+              startColumnIndex: 1,
+              endColumnIndex: 4,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+
+        ...productos.map((_, index) => ({
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: inicioProductos - 1 + index,
+              endRowIndex: inicioProductos + index,
+              startColumnIndex: 1,
+              endColumnIndex: 4,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        })),
 
         {
           repeatCell: {
@@ -369,7 +525,7 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
               startRowIndex: 0,
               endRowIndex: 2,
               startColumnIndex: 0,
-              endColumnIndex: 3,
+              endColumnIndex: 4,
             },
             cell: {
               userEnteredFormat: {
@@ -382,7 +538,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
                 },
               },
             },
-            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment,textFormat)",
+            fields:
+              "userEnteredFormat(horizontalAlignment,verticalAlignment,textFormat)",
           },
         },
 
@@ -391,17 +548,19 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
             range: {
               sheetId,
               startRowIndex: 3,
-              endRowIndex: 10,
+              endRowIndex: 7,
               startColumnIndex: 0,
-              endColumnIndex: 1,
+              endColumnIndex: 4,
             },
             cell: {
               userEnteredFormat: {
-                textFormat: { bold: true },
-                horizontalAlignment: "LEFT",
+                backgroundColor: colorHex("#FFFFFF"),
+                verticalAlignment: "MIDDLE",
+                wrapStrategy: "WRAP",
               },
             },
-            fields: "userEnteredFormat(textFormat,horizontalAlignment)",
+            fields:
+              "userEnteredFormat(backgroundColor,verticalAlignment,wrapStrategy)",
           },
         },
 
@@ -410,9 +569,29 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
             range: {
               sheetId,
               startRowIndex: 3,
-              endRowIndex: 10,
-              startColumnIndex: 1,
-              endColumnIndex: 2,
+              endRowIndex: 7,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: {
+                  foregroundColor: colorHex("#111111"),
+                },
+              },
+            },
+            fields: "userEnteredFormat.textFormat.foregroundColor",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 7,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
             },
             cell: {
               userEnteredFormat: {
@@ -427,10 +606,65 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 11,
-              endRowIndex: 12,
+              startRowIndex: 3,
+              endRowIndex: 7,
               startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: {
+                  fontSize: 10,
+                },
+              },
+            },
+            fields: "userEnteredFormat.textFormat.fontSize",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 7,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+              },
+            },
+            fields: "userEnteredFormat.textFormat.bold",
+          },
+        },
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 7,
+              startColumnIndex: 2,
               endColumnIndex: 3,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+              },
+            },
+            fields: "userEnteredFormat.textFormat.bold",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 8,
+              endRowIndex: 9,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
             },
             cell: {
               userEnteredFormat: {
@@ -452,7 +686,8 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 12,
+              startRowIndex: 9,
+              endRowIndex: 9 + Math.max(productos.length, 1),
               startColumnIndex: 0,
               endColumnIndex: 1,
             },
@@ -470,9 +705,52 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           repeatCell: {
             range: {
               sheetId,
-              startRowIndex: 12,
+              startRowIndex: 9,
+              endRowIndex: 9 + Math.max(productos.length, 1),
               startColumnIndex: 1,
-              endColumnIndex: 2,
+              endColumnIndex: 4,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: "LEFT",
+                verticalAlignment: "MIDDLE",
+                wrapStrategy: "WRAP",
+              },
+            },
+            fields:
+              "userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy)",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: filaFirmas - 1,
+              endRowIndex: filaFirmas,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                horizontalAlignment: "CENTER",
+                verticalAlignment: "MIDDLE",
+              },
+            },
+            fields:
+              "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment)",
+          },
+        },
+
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: filaFirmas + 1,
+              endRowIndex: filaFirmas + 2,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
             },
             cell: {
               userEnteredFormat: {
@@ -485,36 +763,18 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
         },
 
         {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 12,
-              startColumnIndex: 2,
-              endColumnIndex: 3,
-            },
-            cell: {
-              userEnteredFormat: {
-                horizontalAlignment: "LEFT",
-                verticalAlignment: "MIDDLE",
-              },
-            },
-            fields: "userEnteredFormat(horizontalAlignment,verticalAlignment)",
-          },
-        },
-
-        {
           updateBorders: {
             range: {
               sheetId,
               startRowIndex: 3,
-              endRowIndex: 10,
+              endRowIndex: 7,
               startColumnIndex: 0,
-              endColumnIndex: 3,
+              endColumnIndex: 4,
             },
-            top: { style: "SOLID", width: 1, color: colorHex("#999999") },
-            bottom: { style: "SOLID", width: 1, color: colorHex("#999999") },
-            left: { style: "SOLID", width: 1, color: colorHex("#999999") },
-            right: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            top: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            bottom: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            left: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            right: { style: "SOLID", width: 1, color: colorHex("#666666") },
             innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
             innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
           },
@@ -524,40 +784,48 @@ async function formatearHojaPedidoImprimible(sheets, arg1, arg2) {
           updateBorders: {
             range: {
               sheetId,
-              startRowIndex: 11,
+              startRowIndex: 8,
+              endRowIndex: 9 + Math.max(productos.length, 1),
               startColumnIndex: 0,
-              endColumnIndex: 3,
+              endColumnIndex: 4,
             },
-            top: { style: "SOLID", width: 1, color: colorHex("#999999") },
-            bottom: { style: "SOLID", width: 1, color: colorHex("#999999") },
-            left: { style: "SOLID", width: 1, color: colorHex("#999999") },
-            right: { style: "SOLID", width: 1, color: colorHex("#999999") },
+            top: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            bottom: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            left: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            right: { style: "SOLID", width: 1, color: colorHex("#666666") },
             innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
             innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
           },
         },
 
         {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 },
-            properties: { pixelSize: 90 },
-            fields: "pixelSize",
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: filaFirmas - 1,
+              endRowIndex: filaFirmas + 2,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            top: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            bottom: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            left: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            right: { style: "SOLID", width: 1, color: colorHex("#666666") },
+            innerHorizontal: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
+            innerVertical: { style: "SOLID", width: 1, color: colorHex("#D9D9D9") },
           },
         },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 },
-            properties: { pixelSize: 130 },
-            fields: "pixelSize",
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 },
-            properties: { pixelSize: 430 },
-            fields: "pixelSize",
-          },
-        },
+
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 130 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 260 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 2, endIndex: 3 }, properties: { pixelSize: 150 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: 3, endIndex: 4 }, properties: { pixelSize: 170 }, fields: "pixelSize" } },
+
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 }, properties: { pixelSize: 36 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 2 }, properties: { pixelSize: 32 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 8, endIndex: 9 }, properties: { pixelSize: 28 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: 9, endIndex: 9 + Math.max(productos.length, 1) }, properties: { pixelSize: 28 }, fields: "pixelSize" } },
+        { updateDimensionProperties: { range: { sheetId, dimension: "ROWS", startIndex: filaFirmas - 1, endIndex: filaFirmas + 2 }, properties: { pixelSize: 34 }, fields: "pixelSize" } },
       ],
     },
   });
